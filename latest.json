@@ -1,0 +1,11 @@
+{
+  "version": "0.1.1",
+  "notes": "New app icon.",
+  "pub_date": "2026-09-19T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNjVDYWJxeTVlSUlqbTJLUHFpS1dSbzV0bFRpSHhOdVpoSzBPdTd5SEt0VUVKN0JZd3dJdm1US3RyNkF6UEozM0RoTURqYUhLdVc5YXNnSjYxZjNBek83OWhta3Q3cUEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5ODI4NzM1CWZpbGU6U3BvdGlMYXJwXzAuMS4xX3g2NC1zZXR1cC5leGUKNFlIN1ZJQ0xLcUgwRTdzRm03WFJQc2FxZGQvT0ZFa1A0cms3ckFoaTVTOVV6Tms4bkhab2hJcVkzL3ovc3RGekd1cnJUaDlDOEJUSFdFT2diWmZaQ0E9PQo=",
+      "url": "https://github.com/Exly78/SpotiLarp/releases/download/v0.1.1/SpotiLarp_0.1.1_x64-setup.exe"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # SpotiLarp
 
-![version](https://img.shields.io/badge/version-0.1.0-blue)
+![version](https://img.shields.io/badge/version-0.1.1-blue)
 ![status](https://img.shields.io/badge/status-early%20WIP-orange)
 ![last updated](https://img.shields.io/badge/last%20updated-2026--09--19-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)

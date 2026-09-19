@@ -1,6 +1,6 @@
 [package]
 name = "spotilarp"
-version = "0.1.0"
+version = "0.1.1"
 description = "A low-RAM Spotify client built with Rust + Tauri"
 authors = ["you"]
 edition = "2021"
