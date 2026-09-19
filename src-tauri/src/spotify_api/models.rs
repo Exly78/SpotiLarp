@@ -1,4 +1,12 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
+}
 
 #[derive(Deserialize)]
 pub struct SearchResponse {
@@ -30,11 +38,11 @@ pub struct Artist {
 pub struct ArtistDetails {
     pub id: String,
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub genres: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub images: Vec<Image>,
-    
+
     #[serde(default)]
     pub followers: Option<Followers>,
 }
@@ -47,7 +55,7 @@ pub struct Followers {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Album {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub images: Vec<Image>,
 }
 
@@ -67,9 +75,9 @@ pub struct PlaylistsResponse {
 pub struct Playlist {
     pub id: String,
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub images: Vec<Image>,
-    
+
     #[serde(rename(deserialize = "items"))]
     pub track_count: PlaylistTrackCount,
 }
