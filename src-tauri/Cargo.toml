@@ -1,0 +1,61 @@
+[package]
+name = "spotilarp"
+version = "0.1.0"
+description = "A low-RAM Spotify client built with Rust + Tauri"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "spotilarp_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# Forces resolution to the last vergen release still compatible with vergen-gitcl's
+# pinned vergen-lib requirement. vergen 9.1.0 bumped its own vergen-lib dependency to
+# 9.1.0 without a major version bump, which breaks vergen-gitcl 1.0.8 (which still
+# needs vergen-lib ^0.1.6), see https://github.com/rustyhorde/vergen/issues/478.
+# librespot-core's Cargo.toml on `master` carries the same pin; not yet released to
+# crates.io as of librespot-core 0.8.0, so we apply it here too.
+vergen = "=9.0.6"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["sync"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+tiny_http = "0.12"
+keyring = { version = "3", features = ["windows-native", "linux-native-sync-persistent", "crypto-rust"] }
+url = "2"
+dirs = "6"
+librespot-core = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-oauth = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-metadata = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+# Only "playback" (cpal output): we feed it raw decoded samples via
+# SamplesBuffer, so none of rodio's own file-format decoders are needed.
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+# No "rodio-backend" feature: we ship our own sink (playback/sink.rs) that
+# fixes a pause/stop bug in librespot's built-in rodio backend, so its copy
+# of the rodio integration is unused dead weight.
+librespot-playback = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+# Discord Rich Presence over the local IPC pipe, talks directly to the
+# already-running Discord client, no network/HTTP client of its own.
+discord-rich-presence = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
