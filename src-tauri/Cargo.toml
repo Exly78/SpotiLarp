@@ -51,6 +51,8 @@ librespot-playback = { version = "0.8.0", default-features = false, features = [
 # Discord Rich Presence over the local IPC pipe, talks directly to the
 # already-running Discord client, no network/HTTP client of its own.
 discord-rich-presence = "1"
+tauri-plugin-updater = "2.11.0"
+tauri-plugin-process = "2.3.1"
 
 [profile.release]
 opt-level = 3

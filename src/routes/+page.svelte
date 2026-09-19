@@ -7,6 +7,7 @@
   import NowPlayingPanel from "$lib/components/NowPlayingPanel.svelte";
   import ClientIdSetup from "$lib/components/ClientIdSetup.svelte";
   import DiscordRpcSettings from "$lib/components/DiscordRpcSettings.svelte";
+  import UpdateBanner from "$lib/components/UpdateBanner.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import { smallestCover } from "$lib/utils.js";
 
@@ -155,6 +156,8 @@
 </script>
 
 <svelte:window onclick={onWindowClick} />
+
+<UpdateBanner />
 
 {#if clientIdConfigured === false}
   <ClientIdSetup onSaved={onClientIdSaved} />
