@@ -52,6 +52,29 @@
     <line x1="5" y1="5" x2="19" y2="19" />
     <line x1="19" y1="5" x2="5" y2="19" />
   </svg>
+{:else if name === "user"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5" />
+  </svg>
+{:else if name === "window-minimize"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <line x1="6" y1="12" x2="18" y2="12" />
+  </svg>
+{:else if name === "window-maximize"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="6.5" y="6.5" width="11" height="11" rx="1" />
+  </svg>
+{:else if name === "window-restore"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+    <rect x="6.5" y="9" width="8.5" height="8.5" rx="1" />
+    <path d="M9 9V7.5a1 1 0 0 1 1-1h6.5a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H15" />
+  </svg>
+{:else if name === "window-close"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <line x1="6.5" y1="6.5" x2="17.5" y2="17.5" />
+    <line x1="17.5" y1="6.5" x2="6.5" y2="17.5" />
+  </svg>
 {:else if name === "home"}
   <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M4 11.5 12 4l8 7.5" />
@@ -78,6 +101,66 @@
     <polyline points="14,3 17,7 14,11" />
     <path d="M20 17H7a3 3 0 0 1-3-3v-2" />
     <polyline points="10,13 7,17 10,21" />
+  </svg>
+{:else if name === "chart"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <line x1="6" y1="20" x2="6" y2="13" />
+    <line x1="12" y1="20" x2="12" y2="5" />
+    <line x1="18" y1="20" x2="18" y2="10" />
+  </svg>
+{:else if name === "clock"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9" />
+    <polyline points="12,7 12,12 15.5,14" />
+  </svg>
+{:else if name === "chevron-left"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="15,5 8,12 15,19" />
+  </svg>
+{:else if name === "chevron-right"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="9,5 16,12 9,19" />
+  </svg>
+{:else if name === "settings"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+  </svg>
+{:else if name === "mini-player"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <rect x="11" y="12" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+  </svg>
+{:else if name === "expand"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="14,4 20,4 20,10" />
+    <polyline points="10,20 4,20 4,14" />
+    <line x1="20" y1="4" x2="13" y2="11" />
+    <line x1="4" y1="20" x2="11" y2="13" />
+  </svg>
+{:else if name === "plus"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+{:else if name === "moon"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />
+  </svg>
+{:else if name === "shuffle"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7h3.5c2 0 3.2 1 4.3 2.7l2.4 4.6c1.1 1.7 2.3 2.7 4.3 2.7H20" />
+    <path d="M3 17h3.5c1.4 0 2.4-0.5 3.2-1.3" />
+    <path d="M14.3 8.3c0.8-0.8 1.8-1.3 3.2-1.3H20" />
+    <polyline points="17,4 20,7 17,10" />
+    <polyline points="17,14 20,17 17,20" />
+  </svg>
+{:else if name === "queue"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="3" y1="6" x2="21" y2="6" />
+    <line x1="3" y1="12" x2="14" y2="12" />
+    <line x1="3" y1="18" x2="11" y2="18" />
+    <polygon points="16,15 16,21 21,18" fill="currentColor" stroke="none" />
   </svg>
 {:else if name === "discord"}
   <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

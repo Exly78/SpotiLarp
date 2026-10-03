@@ -1,8 +1,8 @@
 # SpotiLarp
 
-![version](https://img.shields.io/badge/version-0.1.2-blue)
+![version](https://img.shields.io/badge/version-1.0.0-blue)
 ![status](https://img.shields.io/badge/status-early%20WIP-orange)
-![last updated](https://img.shields.io/badge/last%20updated-2026--09--19-lightgrey)
+![last updated](https://img.shields.io/badge/last%20updated-2026--10--03-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri%20%2B%20SvelteKit-informational)
 
@@ -71,6 +71,18 @@ npm run tauri build
 
 Produces a release binary and installer(s) for your platform under
 `src-tauri/target/release/bundle/` (e.g. `msi/` on Windows).
+
+## Good to know
+
+- **Playback depends on librespot.** Browsing your library uses your own Client ID, but
+  playback goes through librespot, which logs in as Spotify's official desktop app (that's
+  the second browser login, "Connect playback"). This isn't an official Spotify API, so a
+  change on Spotify's side can break playback until librespot catches up.
+- **Lyrics come from [LRCLIB](https://lrclib.net).** While the lyrics view is open, the
+  playing song's title, artist, album and length are sent to lrclib.net to look them up.
+  Nothing is sent while lyrics are closed.
+- **Logins are stored in your OS keychain** (Windows Credential Manager, macOS Keychain,
+  Secret Service on Linux). Logging out removes both the library and the playback login.
 
 ## Project structure
 

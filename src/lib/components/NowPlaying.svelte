@@ -1,121 +1,58 @@
 <script>
-  import { onMount, onDestroy } from "svelte";
+  import { untrack } from "svelte";
   import { fade } from "svelte/transition";
-  import { listen } from "@tauri-apps/api/event";
-  import * as api from "../api.js";
-  import { queue, next, previous, hasNext, hasPrevious, cycleRepeatMode } from "../queue.svelte.js";
+  import { queue, next, hasNext, cycleRepeatMode, toggleShuffle } from "../queue.svelte.js";
+  import {
+    player,
+    togglePlay,
+    seekTo,
+    setVolume,
+    toggleMute,
+    previousOrRestart,
+  } from "../player.svelte.js";
+  import { likedIds, likeBusy, refreshLiked, toggleLike } from "../likes.svelte.js";
+  import { navigate, openArtist, openAlbum } from "../nav.svelte.js";
+  import { sleep } from "../sleep.svelte.js";
   import { formatTime } from "../utils.js";
   import Icon from "./Icon.svelte";
 
-  let trackName = $state("Nothing playing");
-  let artists = $state("");
-  let coverUrl = $state(null);
-  let durationMs = $state(0);
-  let positionMs = $state(0);
-  let isPlaying = $state(false);
-  let volume = $state(50);
+  const VOLUME_WHEEL_STEP = 5;
+
+  /** @type {{ queueOpen?: boolean, onToggleQueue?: () => void, onMiniMode?: () => void }} */
+  let { queueOpen = false, onToggleQueue, onMiniMode } = $props();
+
   let volumeHoverPct = $state(-1);
   let seekHoverPct = $state(-1);
-  /** @type {string|null} */
-  let trackId = $state(null);
-  let liked = $state(false);
-  let likeBusy = $state(false);
-  /** @type {string|null} */
-  let checkedLikeFor = null;
+  /** @type {number|null} */
+  let dragMs = $state(null);
 
-  const seekPct = $derived(durationMs > 0 ? (positionMs / durationMs) * 100 : 0);
-
-  /** @type {import("@tauri-apps/api/event").UnlistenFn|undefined} */
-  let unlisten;
-
-  onMount(async () => {
-    unlisten = await listen("player-event", (event) => {
-      const e = event.payload;
-      switch (e.type) {
-        case "TrackChanged":
-          trackName = e.name;
-          artists = e.artists;
-          coverUrl = e.cover_url;
-          durationMs = e.duration_ms;
-          trackId = e.track_id;
-          break;
-        case "Playing":
-          isPlaying = true;
-          positionMs = e.position_ms;
-          break;
-        case "Paused":
-          isPlaying = false;
-          positionMs = e.position_ms;
-          break;
-        case "PositionChanged":
-        case "Seeked":
-          positionMs = e.position_ms;
-          break;
-        case "Stopped":
-        case "EndOfTrack":
-          isPlaying = false;
-          break;
-        case "VolumeChanged":
-          volume = Math.round((e.volume / 65535) * 100);
-          break;
-      }
-    });
-  });
-
-  onDestroy(() => {
-    unlisten?.();
-  });
-
-  function togglePlay() {
-    if (isPlaying) {
-      api.pause();
-    } else {
-      api.resume();
-    }
-  }
+  const trackId = $derived(player.track?.trackId ?? null);
+  const album = $derived(queue.current && queue.current.id === trackId ? queue.current.album : null);
+  const sleepActive = $derived(sleep.endsAt !== null || sleep.endOfTrack);
+  const durationMs = $derived(player.track?.durationMs ?? 0);
+  const shownMs = $derived(dragMs ?? player.positionMs);
+  const seekPct = $derived(durationMs > 0 ? Math.min(100, (shownMs / durationMs) * 100) : 0);
 
   $effect(() => {
-    if (trackId && trackId !== checkedLikeFor) {
-      checkedLikeFor = trackId;
-      api
-        .isTrackLiked(trackId)
-        .then((result) => {
-          if (trackId === checkedLikeFor) liked = result;
-        })
-        .catch((e) => console.error("Failed to check liked state:", e));
-    } else if (!trackId) {
-      checkedLikeFor = null;
-      liked = false;
-    }
+    const id = trackId;
+    if (id) untrack(() => refreshLiked([id]));
   });
 
-  async function toggleLike() {
-    if (!trackId || likeBusy) return;
-    likeBusy = true;
-    const next = !liked;
-    try {
-      if (next) await api.likeTrack(trackId);
-      else await api.unlikeTrack(trackId);
-      liked = next;
-    } catch (e) {
-      console.error("Failed to update liked state:", e);
-    } finally {
-      likeBusy = false;
-    }
+  /** @param {Event} evt */
+  function onSeekInput(evt) {
+    dragMs = Number(/** @type {HTMLInputElement} */ (evt.target).value);
   }
 
   /** @param {Event} evt */
-  function onSeek(evt) {
+  function onSeekCommit(evt) {
     const ms = Number(/** @type {HTMLInputElement} */ (evt.target).value);
-    positionMs = ms;
-    api.seek(ms);
+    dragMs = null;
+    seekTo(ms);
   }
 
   /** @param {Event} evt */
   function onVolume(evt) {
-    const pct = Number(/** @type {HTMLInputElement} */ (evt.target).value);
-    volume = pct;
-    api.setVolume(Math.round((pct / 100) * 65535));
+    setVolume(Number(/** @type {HTMLInputElement} */ (evt.target).value));
   }
 
   /** @param {MouseEvent & { currentTarget: HTMLElement }} evt */
@@ -126,6 +63,12 @@
 
   function onVolumeHoverLeave() {
     volumeHoverPct = -1;
+  }
+
+  /** @param {WheelEvent} evt */
+  function onVolumeWheel(evt) {
+    const step = evt.deltaY < 0 ? VOLUME_WHEEL_STEP : -VOLUME_WHEEL_STEP;
+    setVolume(Math.min(100, Math.max(0, player.volume + step)));
   }
 
   /** @param {MouseEvent & { currentTarget: HTMLElement }} evt */
@@ -141,38 +84,67 @@
 
 <div class="now-playing">
   <div class="track-info">
-    {#key coverUrl}
-      {#if coverUrl}
-        <img src={coverUrl} alt="" class="cover" in:fade={{ duration: 250 }} />
+    {#key player.track?.coverUrl}
+      {#if player.track?.coverUrl}
+        <img src={player.track.coverUrl} alt="" class="cover" in:fade={{ duration: 250 }} />
       {:else}
         <div class="cover placeholder"></div>
       {/if}
     {/key}
     <div class="text">
-      <div class="track-name">{trackName}</div>
-      <div class="artists">{artists}</div>
+      <div class="track-name">
+        {#if album?.id}
+          <button type="button" class="link" onclick={() => album && openAlbum(album)}>{player.track?.name}</button>
+        {:else}
+          {player.track?.name ?? "Nothing playing"}
+        {/if}
+      </div>
+      <div class="artists">
+        {#if player.track?.artistList?.length}
+          {#each player.track.artistList as artist, i}
+            {#if i > 0},&nbsp;{/if}{#if artist.id}<button type="button" class="link" onclick={() => artist.id && openArtist({ id: artist.id, name: artist.name })}>{artist.name}</button>{:else}{artist.name}{/if}
+          {/each}
+        {:else}
+          {player.track?.artists ?? ""}
+        {/if}
+      </div>
     </div>
     {#if trackId}
       <button
         type="button"
         class="icon-button like-button"
-        class:liked
-        disabled={likeBusy}
-        onclick={toggleLike}
-        aria-label={liked ? "Unlike" : "Like"}
+        class:liked={likedIds.has(trackId)}
+        disabled={likeBusy.has(trackId)}
+        onclick={() => toggleLike(trackId)}
+        aria-label={likedIds.has(trackId) ? "Unlike" : "Like"}
       >
-        <Icon name={liked ? "heart-filled" : "heart"} size={17} />
+        <Icon name={likedIds.has(trackId) ? "heart-filled" : "heart"} size={17} />
       </button>
     {/if}
   </div>
 
   <div class="transport">
     <div class="buttons">
-      <button onclick={previous} disabled={!hasPrevious()} class="icon-button" aria-label="Previous">
+      <button
+        type="button"
+        onclick={toggleShuffle}
+        class="icon-button toggle-button"
+        class:active={queue.shuffle}
+        aria-label={queue.shuffle ? "Disable shuffle" : "Enable shuffle"}
+        aria-pressed={queue.shuffle}
+      >
+        <Icon name="shuffle" size={17} />
+      </button>
+      <button onclick={previousOrRestart} disabled={!player.track} class="icon-button" aria-label="Previous">
         <Icon name="previous" size={18} />
       </button>
-      <button onclick={togglePlay} class="icon-button play-pause" aria-label={isPlaying ? "Pause" : "Play"}>
-        <Icon name={isPlaying ? "pause" : "play"} size={16} />
+      <button
+        onclick={togglePlay}
+        disabled={!player.track}
+        class="icon-button play-pause"
+        aria-label={player.isPlaying ? "Pause" : "Play"}
+      >
+        <Icon name={player.isPlaying ? "pause" : "play"} size={16} />
       </button>
       <button onclick={next} disabled={!hasNext()} class="icon-button" aria-label="Next">
         <Icon name="next" size={18} />
@@ -180,7 +152,7 @@
       <button
         type="button"
         onclick={cycleRepeatMode}
-        class="icon-button repeat-button"
+        class="icon-button toggle-button"
         class:active={queue.repeatMode !== "off"}
         aria-label={`Repeat: ${queue.repeatMode}`}
         aria-pressed={queue.repeatMode !== "off"}
@@ -189,7 +161,7 @@
       </button>
     </div>
     <div class="seek-row">
-      <span class="time">{formatTime(positionMs)}</span>
+      <span class="time">{formatTime(shownMs)}</span>
       <div
         class="slider-wrap"
         role="presentation"
@@ -203,9 +175,12 @@
           type="range"
           min="0"
           max={durationMs || 1}
-          value={positionMs}
-          oninput={onSeek}
+          value={shownMs}
+          oninput={onSeekInput}
+          onchange={onSeekCommit}
+          disabled={!player.track}
           class="seek-slider"
+          aria-label="Seek"
         />
       </div>
       <span class="time">{formatTime(durationMs)}</span>
@@ -213,25 +188,60 @@
   </div>
 
   <div class="volume-row">
-    <Icon name={volume === 0 ? "volume-mute" : "volume"} size={16} class="volume-icon" />
+    {#if sleepActive}
+      <button
+        type="button"
+        class="icon-button toggle-button active side-button"
+        onclick={() => navigate({ type: "settings" })}
+        aria-label="Sleep timer is on"
+        title={sleep.endOfTrack ? "Sleep timer: end of song" : `Sleep timer: ${Math.ceil(sleep.remainingMs / 60000)} min left`}
+      >
+        <Icon name="moon" size={16} />
+      </button>
+    {/if}
+    <button
+      type="button"
+      class="icon-button toggle-button queue-button"
+      class:active={queueOpen}
+      onclick={onToggleQueue}
+      aria-label={queueOpen ? "Hide queue" : "Show queue"}
+      aria-pressed={queueOpen}
+    >
+      <Icon name="queue" size={16} />
+    </button>
+    <button
+      type="button"
+      class="icon-button mute-button"
+      onclick={toggleMute}
+      aria-label={player.volume === 0 ? "Unmute" : "Mute"}
+    >
+      <Icon name={player.volume === 0 ? "volume-mute" : "volume"} size={16} />
+    </button>
     <div
       class="slider-wrap"
       role="presentation"
       onmousemove={onVolumeHoverMove}
       onmouseleave={onVolumeHoverLeave}
+      onwheel={onVolumeWheel}
     >
       <div class="track-base"></div>
       <div class="track-preview" style="width: {Math.max(volumeHoverPct, 0)}%"></div>
-      <div class="track-fill" style="width: {volume}%"></div>
+      <div class="track-fill" style="width: {player.volume}%"></div>
       <input
         type="range"
         min="0"
         max="100"
-        value={volume}
+        value={player.volume}
         oninput={onVolume}
         class="volume-slider"
+        aria-label="Volume"
       />
     </div>
+    {#if onMiniMode}
+      <button type="button" class="icon-button side-button" onclick={onMiniMode} aria-label="Open mini player" title="Mini player">
+        <Icon name="mini-player" size={16} />
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -324,7 +334,7 @@
 .like-button.liked {
   color: var(--accent);
 }
-.repeat-button.active {
+.toggle-button.active {
   color: var(--accent);
 }
 .play-pause {
@@ -358,11 +368,30 @@
   gap: 0.6em;
   justify-self: end;
   width: 100%;
-  max-width: 160px;
+  max-width: 260px;
 }
-:global(.volume-icon) {
-  color: var(--text-dim);
+.mute-button,
+.queue-button,
+.side-button {
   flex-shrink: 0;
+}
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+.mute-button:hover {
+  transform: none;
+}
+input[type="range"]:disabled {
+  cursor: default;
 }
 
 .slider-wrap {

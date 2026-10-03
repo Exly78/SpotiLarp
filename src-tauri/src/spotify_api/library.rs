@@ -5,15 +5,12 @@ use super::client::SpotifyClient;
 const CONTAINS_CHUNK_SIZE: usize = 40;
 
 pub async fn is_saved_batch(client: &mut SpotifyClient, uris: &[String]) -> Result<Vec<bool>, String> {
-    let mut results = Vec::with_capacity(uris.len());
-    for chunk in uris.chunks(CONTAINS_CHUNK_SIZE) {
-        let joined = chunk.join(",");
-        let chunk_results: Vec<bool> = client
-            .get_json("/me/library/contains", &[("uris", joined.as_str())])
-            .await?;
-        results.extend(chunk_results);
-    }
-    Ok(results)
+    let requests = uris
+        .chunks(CONTAINS_CHUNK_SIZE)
+        .map(|chunk| ("/me/library/contains".to_string(), vec![("uris", chunk.join(","))]))
+        .collect();
+    let chunks: Vec<Vec<bool>> = client.get_json_concurrent(requests).await?;
+    Ok(chunks.into_iter().flatten().collect())
 }
 
 pub async fn is_saved(client: &mut SpotifyClient, uri: &str) -> Result<bool, String> {

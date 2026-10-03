@@ -1,3 +1,5 @@
+pub mod autoplay;
+pub mod equalizer;
 pub mod events;
 pub mod player;
 pub mod session;
@@ -5,6 +7,7 @@ pub mod sink;
 pub mod token_store;
 
 pub const CONNECT_OAUTH_REDIRECT_PORT: u16 = 8899;
+pub const CONNECT_OAUTH_REDIRECT_PATH: &str = "/login";
 
 pub const CONNECT_OAUTH_SCOPES: &[&str] = &[
     "app-remote-control",

@@ -1,18 +1,14 @@
 <script>
-  import { onMount, onDestroy } from "svelte";
+  import { untrack } from "svelte";
   import { fade } from "svelte/transition";
-  import { listen } from "@tauri-apps/api/event";
   import Icon from "./Icon.svelte";
   import * as api from "../api.js";
+  import { openArtist } from "../nav.svelte.js";
+  import { player } from "../player.svelte.js";
 
   let { contextName = null, onClose } = $props();
 
-  let trackName = $state("Nothing playing");
-  let artists = $state("");
-  /** @type {string|null} */
-  let coverUrl = $state(null);
-  /** @type {string|null} */
-  let artistId = $state(null);
+  const artistId = $derived(player.track?.primaryArtistId ?? null);
 
   /** @type {import("../types.js").ArtistDetails|null} */
   let artistDetails = $state(null);
@@ -26,29 +22,11 @@
 
   const followerCountFormatter = new Intl.NumberFormat();
 
-  /** @type {import("@tauri-apps/api/event").UnlistenFn|undefined} */
-  let unlisten;
-
-  onMount(async () => {
-    unlisten = await listen("player-event", (event) => {
-      const e = event.payload;
-      if (e.type === "TrackChanged") {
-        trackName = e.name;
-        artists = e.artists;
-        coverUrl = e.cover_url;
-        artistId = e.primary_artist_id;
-      }
-    });
-  });
-
-  onDestroy(() => {
-    unlisten?.();
-  });
-
   $effect(() => {
-    if (artistId && artistId !== loadedArtistId) {
-      loadArtist(artistId);
-    } else if (!artistId) {
+    const id = artistId;
+    if (id && id !== loadedArtistId) {
+      untrack(() => loadArtist(id));
+    } else if (!id) {
       loadedArtistId = null;
       artistDetails = null;
     }
@@ -60,7 +38,9 @@
     artistLoading = true;
     artistDetails = null;
     artistError = "";
-    
+    following = false;
+    followError = "";
+
     try {
       const details = await api.getArtist(id);
       if (artistId === id) artistDetails = details;
@@ -70,7 +50,6 @@
     } finally {
       if (artistId === id) artistLoading = false;
     }
-    followError = "";
     try {
       const isFollowing = await api.isFollowingArtist(id);
       if (artistId === id) following = isFollowing;
@@ -81,24 +60,25 @@
   }
 
   async function toggleFollow() {
-    if (!artistId || followBusy) return;
+    const id = artistId;
+    if (!id || followBusy) return;
     followBusy = true;
     followError = "";
     const next = !following;
     try {
-      if (next) await api.followArtist(artistId);
-      else await api.unfollowArtist(artistId);
-      following = next;
+      if (next) await api.followArtist(id);
+      else await api.unfollowArtist(id);
+      if (artistId === id) following = next;
     } catch (e) {
       console.error("Failed to update follow state:", e);
-      followError = String(e);
+      if (artistId === id) followError = String(e);
     } finally {
       followBusy = false;
     }
   }
 </script>
 
-<div class="panel">
+<div class="panel" class:tinted={!!player.color} style={player.color ? `--tint: ${player.color}` : ""}>
   <div class="panel-header">
     <span class="context-name">{contextName ?? "Now Playing"}</span>
     <button type="button" class="close-button" onclick={onClose} aria-label="Close panel">
@@ -107,9 +87,9 @@
   </div>
 
   <div class="cover-frame">
-    {#key coverUrl}
-      {#if coverUrl}
-        <img src={coverUrl} alt="" class="cover" in:fade={{ duration: 250 }} />
+    {#key player.track?.coverUrl}
+      {#if player.track?.coverUrl}
+        <img src={player.track.coverUrl} alt="" class="cover" in:fade={{ duration: 250 }} />
       {:else}
         <div class="cover placeholder"></div>
       {/if}
@@ -117,11 +97,11 @@
   </div>
 
   <div class="track-meta">
-    <div class="track-name">{trackName}</div>
-    <div class="artists">{artists}</div>
+    <div class="track-name">{player.track?.name ?? "Nothing playing"}</div>
+    <div class="artists">{player.track?.artists ?? ""}</div>
   </div>
 
-  {#if trackName !== "Nothing playing"}
+  {#if player.track}
     <div class="artist-card" transition:fade={{ duration: 200 }}>
       {#if !artistId}
         <div class="artist-card-status">No catalog artist ID for this track.</div>
@@ -134,7 +114,9 @@
         </div>
         <div class="artist-card-body">
           <div class="artist-card-row">
-            <div class="artist-card-name">{artistDetails.name}</div>
+            <button type="button" class="artist-card-name" onclick={() => artistDetails && openArtist(artistDetails)}>
+              {artistDetails.name}
+            </button>
             <button
               type="button"
               class="follow-button"
@@ -176,6 +158,10 @@
   padding: 1em;
   overflow-x: hidden;
   overflow-y: auto;
+}
+.panel.tinted {
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--tint) 70%, var(--surface)) 0, var(--surface) 420px);
+  transition: background 400ms ease;
 }
 .panel-header {
   display: flex;
@@ -293,13 +279,22 @@
   gap: 0.75em;
 }
 .artist-card-name {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
   font-size: var(--fs-md);
   font-weight: var(--fw-black);
   color: var(--text);
+  text-align: left;
+  cursor: pointer;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.artist-card-name:hover {
+  text-decoration: underline;
 }
 .artist-card-followers {
   margin-top: 0.3em;

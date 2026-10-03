@@ -4,63 +4,81 @@ use librespot_core::authentication::Credentials;
 use librespot_core::cache::Cache;
 use librespot_core::config::SessionConfig;
 use librespot_core::session::Session;
-use librespot_oauth::{OAuthClient, OAuthClientBuilder};
+use tauri::AppHandle;
 
 use super::token_store;
-use super::{CONNECT_OAUTH_REDIRECT_PORT, CONNECT_OAUTH_SCOPES};
+use super::{CONNECT_OAUTH_REDIRECT_PATH, CONNECT_OAUTH_REDIRECT_PORT, CONNECT_OAUTH_SCOPES};
+use crate::auth::oauth::{self, RefreshError, TokenResponse};
+
+const NOT_CONNECTED: &str = "Playback isn't connected, click \"Connect playback\"";
 
 pub fn has_cached_credentials() -> bool {
     token_store::load_refresh_token().is_some()
 }
 
-fn cache_dir() -> PathBuf {
-    let base = dirs::config_dir().expect("could not determine OS config directory");
-    base.join("SpotiLarp")
-        .join("librespot-cache")
+pub fn audio_cache_dir() -> Option<PathBuf> {
+    dirs::cache_dir().map(|base| base.join("SpotiLarp").join("audio"))
 }
 
-fn build_oauth_client(client_id: &str) -> Result<OAuthClient, String> {
-    let redirect_uri = format!("http://127.0.0.1:{CONNECT_OAUTH_REDIRECT_PORT}/login");
-    OAuthClientBuilder::new(client_id, &redirect_uri, CONNECT_OAUTH_SCOPES.to_vec())
-        .open_in_browser()
-        .build()
-        .map_err(|e| format!("failed to build librespot OAuth client: {e}"))
+fn remove_legacy_credentials() {
+    if let Some(base) = dirs::config_dir() {
+        let _ = std::fs::remove_file(base.join("SpotiLarp").join("librespot-cache").join("credentials.json"));
+    }
 }
 
-fn obtain_credentials_interactive(client_id: &str) -> Result<Credentials, String> {
-    let oauth_client = build_oauth_client(client_id)?;
-    let token = oauth_client
-        .get_access_token()
-        .map_err(|e| format!("librespot OAuth login failed: {e}"))?;
-    let _ = token_store::save_refresh_token(&token.refresh_token);
-    Ok(Credentials::with_access_token(token.access_token))
+pub fn forget_credentials() -> Result<(), String> {
+    remove_legacy_credentials();
+    token_store::clear_refresh_token()
 }
 
-fn obtain_credentials(client_id: &str) -> Result<Credentials, String> {
+fn into_credentials(token: TokenResponse) -> Credentials {
+    if let Some(refresh_token) = token.refresh_token.as_deref().filter(|t| !t.is_empty()) {
+        let _ = token_store::save_refresh_token(refresh_token);
+    }
+    Credentials::with_access_token(token.access_token)
+}
+
+async fn obtain_credentials(app: &AppHandle, client_id: &str, interactive: bool) -> Result<Credentials, String> {
+    let http = crate::http::client();
     if let Some(refresh_token) = token_store::load_refresh_token() {
-        let oauth_client = build_oauth_client(client_id)?;
-        if let Ok(token) = oauth_client.refresh_token(&refresh_token) {
-            let _ = token_store::save_refresh_token(&token.refresh_token);
-            return Ok(Credentials::with_access_token(token.access_token));
+        match oauth::refresh(&http, client_id, &refresh_token).await {
+            Ok(token) => return Ok(into_credentials(token)),
+            Err(RefreshError::Revoked) => {
+                let _ = token_store::clear_refresh_token();
+            }
+            Err(RefreshError::Failed(e)) => return Err(e),
         }
     }
-    obtain_credentials_interactive(client_id)
+    if !interactive {
+        return Err(NOT_CONNECTED.to_string());
+    }
+    let scopes = CONNECT_OAUTH_SCOPES.join(" ");
+    let code = oauth::browser_login(
+        app,
+        client_id,
+        &scopes,
+        CONNECT_OAUTH_REDIRECT_PORT,
+        CONNECT_OAUTH_REDIRECT_PATH,
+        false,
+    )
+    .await?;
+    Ok(into_credentials(oauth::exchange_code(&http, client_id, &code).await?))
 }
 
-pub async fn connect() -> Result<Session, String> {
-    let dir = cache_dir();
-    let cache = Cache::new(Some(&dir), None, None, None).map_err(|e| e.to_string())?;
+pub async fn connect(app: &AppHandle, cache_limit_mb: u64, interactive: bool) -> Result<Session, String> {
+    remove_legacy_credentials();
+    let (audio_dir, size_limit) = match audio_cache_dir() {
+        Some(dir) if cache_limit_mb > 0 => (Some(dir), Some(cache_limit_mb * 1024 * 1024)),
+        _ => (None, None),
+    };
+    let cache = Cache::new(None::<PathBuf>, None, audio_dir, size_limit).map_err(|e| e.to_string())?;
 
     let config = SessionConfig::default();
-    let client_id = config.client_id.clone();
-
-    let credentials = tokio::task::spawn_blocking(move || obtain_credentials(&client_id))
-        .await
-        .map_err(|e| format!("librespot OAuth task panicked: {e}"))??;
+    let credentials = obtain_credentials(app, &config.client_id, interactive).await?;
 
     let session = Session::new(config, Some(cache));
     session
-        .connect(credentials, true)
+        .connect(credentials, false)
         .await
         .map_err(|e| format!("failed to connect Spotify Connect session: {e}"))?;
     Ok(session)

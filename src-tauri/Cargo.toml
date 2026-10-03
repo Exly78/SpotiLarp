@@ -1,8 +1,8 @@
 [package]
 name = "spotilarp"
-version = "0.1.2"
+version = "1.0.0"
 description = "A low-RAM Spotify client built with Rust + Tauri"
-authors = ["you"]
+authors = ["Exly"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -25,12 +25,12 @@ tauri-build = { version = "2", features = [] }
 vergen = "=9.0.6"
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt", "time"] }
 rand = "0.8"
 sha2 = "0.10"
 base64 = "0.22"
@@ -39,8 +39,9 @@ keyring = { version = "3", features = ["windows-native", "linux-native-sync-pers
 url = "2"
 dirs = "6"
 librespot-core = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
-librespot-oauth = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-metadata = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+# Request/response types for Spotify's internal endpoints (autoplay).
+librespot-protocol = "0.8.0"
 # Only "playback" (cpal output): we feed it raw decoded samples via
 # SamplesBuffer, so none of rodio's own file-format decoders are needed.
 rodio = { version = "0.21", default-features = false, features = ["playback"] }
@@ -51,8 +52,15 @@ librespot-playback = { version = "0.8.0", default-features = false, features = [
 # Discord Rich Presence over the local IPC pipe, talks directly to the
 # already-running Discord client, no network/HTTP client of its own.
 discord-rich-presence = "1"
+# OS media controls: media keys, headset buttons and the Windows media
+# overlay (SMTC). zbus instead of the default dbus so Linux builds need no
+# system dbus headers.
+souvlaki = { version = "0.8.3", default-features = false, features = ["use_zbus"] }
 tauri-plugin-updater = "2.11.0"
 tauri-plugin-process = "2.3.1"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
 
 [profile.release]
 opt-level = 3

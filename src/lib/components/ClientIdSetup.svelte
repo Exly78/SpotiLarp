@@ -1,7 +1,8 @@
 <script>
   import * as api from "../api.js";
 
-  let { onSaved } = $props();
+  /** @type {{ onSaved: () => void, onCancel?: () => void }} */
+  let { onSaved, onCancel } = $props();
 
   let clientId = $state("");
   let saving = $state(false);
@@ -9,6 +10,10 @@
 
   async function save() {
     if (!clientId.trim() || saving) return;
+    if (!/^[0-9a-f]{32}$/i.test(clientId.trim())) {
+      error = "That doesn't look like a Client ID, it should be 32 letters and numbers.";
+      return;
+    }
     saving = true;
     error = "";
     try {
@@ -56,9 +61,14 @@
     {#if error}
       <p class="error">{error}</p>
     {/if}
-    <button type="button" onclick={save} disabled={saving || !clientId.trim()} class="save-button">
-      {saving ? "Saving..." : "Save & Continue"}
-    </button>
+    <div class="actions">
+      <button type="button" onclick={save} disabled={saving || !clientId.trim()} class="save-button">
+        {saving ? "Saving..." : "Save & Continue"}
+      </button>
+      {#if onCancel}
+        <button type="button" onclick={onCancel} disabled={saving} class="cancel-button">Cancel</button>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -68,7 +78,9 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 2em;
   background: var(--bg);
 }
@@ -161,5 +173,23 @@ h1 {
 .save-button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+}
+.cancel-button {
+  padding: 0.6em 1em;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  font-family: inherit;
+  cursor: pointer;
+}
+.cancel-button:hover:not(:disabled) {
+  color: var(--text);
 }
 </style>

@@ -1,73 +1,132 @@
 <script>
   import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import * as api from "$lib/api.js";
+  import { contextLabel, playFromList, next, toggleShuffle, cycleRepeatMode, resetQueue } from "$lib/queue.svelte.js";
+  import { openTrackMenu } from "$lib/contextMenu.svelte.js";
+  import {
+    player,
+    togglePlay,
+    previousOrRestart,
+    seekTo,
+    setVolume,
+    toggleMute,
+    resetPlayer,
+  } from "$lib/player.svelte.js";
+  import { notify } from "$lib/toast.svelte.js";
+  import { nav, navigate, goBack, goForward, resetNav } from "$lib/nav.svelte.js";
+  import { loadLibrary, clearLibrary } from "$lib/library.svelte.js";
+  import { likedIds } from "$lib/likes.svelte.js";
   import PlaylistSidebar from "$lib/components/PlaylistSidebar.svelte";
   import MainContent from "$lib/components/MainContent.svelte";
+  import { clearPlaylistCache } from "$lib/components/views/PlaylistView.svelte";
+  import { clearStatsCache } from "$lib/components/views/StatsView.svelte";
   import NowPlaying from "$lib/components/NowPlaying.svelte";
   import NowPlayingPanel from "$lib/components/NowPlayingPanel.svelte";
+  import QueuePanel from "$lib/components/QueuePanel.svelte";
+  import TrackContextMenu from "$lib/components/TrackContextMenu.svelte";
+  import MiniPlayer from "$lib/components/MiniPlayer.svelte";
   import ClientIdSetup from "$lib/components/ClientIdSetup.svelte";
   import DiscordRpcSettings from "$lib/components/DiscordRpcSettings.svelte";
   import UpdateBanner from "$lib/components/UpdateBanner.svelte";
+  import WindowControls from "$lib/components/WindowControls.svelte";
+  import AccountMenu from "$lib/components/AccountMenu.svelte";
+  import Toasts from "$lib/components/Toasts.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import { smallestCover } from "$lib/utils.js";
 
   /** @type {boolean|null} */
   let clientIdConfigured = $state(null);
+  let changingClientId = $state(false);
 
+  let loggedIn = $state(false);
+  let restoring = $state(false);
+  let restoreFailed = $state(false);
   let status = $state("Not logged in");
+  let displayName = $state("");
   let loggingIn = $state(false);
   let loggingOut = $state(false);
 
+  let playbackConnected = $state(false);
   let playbackStatus = $state("Not connected");
   let connecting = $state(false);
+  let connectingInteractive = $state(false);
 
-  /** @type {import("$lib/types.js").Playlist|null} */
-  let selectedPlaylist = $state(null);
-  /** @type {{ load: () => Promise<void> } | undefined} */
-  let sidebar;
   let showPanel = $state(true);
-  let showLyrics = $state(false);
+  let panelView = $state("nowPlaying");
+  let miniMode = $state(false);
 
   let searchQuery = $state("");
   /** @type {import("$lib/types.js").Track[]} */
   let searchResults = $state([]);
+  let resultsFor = $state("");
   let searching = $state(false);
   let searchError = $state("");
   let showDropdown = $state(false);
+  let highlighted = $state(-1);
   /** @type {HTMLDivElement|undefined} */
-  let searchBox;
+  let searchBox = $state();
+  /** @type {HTMLInputElement|undefined} */
+  let searchInput = $state();
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let debounceHandle;
+  let searchToken = 0;
+
+  const shownResults = $derived(searchResults.slice(0, 8));
+  const searchPending = $derived(searching || resultsFor !== searchQuery.trim());
 
   function onSearchInput() {
     clearTimeout(debounceHandle);
     showDropdown = true;
+    highlighted = -1;
     if (!searchQuery.trim()) {
+      searchToken++;
       searchResults = [];
       searchError = "";
+      resultsFor = "";
+      searching = false;
       return;
     }
     debounceHandle = setTimeout(runSearch, 300);
   }
 
   async function runSearch() {
+    const token = ++searchToken;
+    const query = searchQuery.trim();
     searching = true;
     searchError = "";
     try {
-      searchResults = await api.search(searchQuery);
+      const results = await api.search(query);
+      if (token === searchToken) searchResults = results;
     } catch (e) {
-      searchError = `Search failed: ${e}`;
+      if (token === searchToken) searchError = `Search failed: ${e}`;
     } finally {
-      searching = false;
+      if (token === searchToken) {
+        resultsFor = query;
+        searching = false;
+      }
     }
   }
 
-  /** @param {import("$lib/types.js").Track} track */
-  function pickResult(track) {
-    api.playTrack(track.uri);
+  /** @param {number} index */
+  function pickResult(index) {
+    playFromList(shownResults, index, `Search: "${searchQuery.trim()}"`);
+    clearTimeout(debounceHandle);
+    searchToken++;
     showDropdown = false;
     searchQuery = "";
     searchResults = [];
+    resultsFor = "";
+    highlighted = -1;
+  }
+
+  function toggleQueue() {
+    if (showPanel && panelView === "queue") {
+      panelView = "nowPlaying";
+    } else {
+      panelView = "queue";
+      showPanel = true;
+    }
   }
 
   function onSearchFocus() {
@@ -83,127 +142,302 @@
 
   /** @param {KeyboardEvent} evt */
   function onSearchKeydown(evt) {
+    const count = searchPending ? 0 : shownResults.length;
     if (evt.key === "Escape") {
       showDropdown = false;
       /** @type {HTMLInputElement} */ (evt.target).blur();
+    } else if (evt.key === "ArrowDown" && count > 0) {
+      evt.preventDefault();
+      showDropdown = true;
+      highlighted = (highlighted + 1) % count;
+    } else if (evt.key === "ArrowUp" && count > 0) {
+      evt.preventDefault();
+      showDropdown = true;
+      highlighted = highlighted <= 0 ? count - 1 : highlighted - 1;
+    } else if (evt.key === "Enter" && highlighted >= 0 && count > 0) {
+      evt.preventDefault();
+      pickResult(highlighted);
+    } else if (evt.key === "Enter" && searchQuery.trim()) {
+      evt.preventDefault();
+      openSearchPage();
     }
   }
 
-  onMount(async () => {
-    clientIdConfigured = await api.hasClientId();
-    if (clientIdConfigured) restoreSessionIfPossible();
+  function openSearchPage() {
+    const query = searchQuery.trim();
+    if (!query) return;
+    showDropdown = false;
+    highlighted = -1;
+    searchInput?.blur();
+    navigate({ type: "search", query });
+  }
+
+  /** @param {boolean} enabled */
+  async function setMiniMode(enabled) {
+    try {
+      await api.setMiniMode(enabled);
+      miniMode = enabled;
+    } catch (e) {
+      notify(`Couldn't switch the mini player: ${e}`);
+    }
+  }
+
+  const VOLUME_STEP = 10;
+  const SEEK_STEP_MS = 5000;
+
+  /** @param {EventTarget|null} target */
+  function isTextField(target) {
+    if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+    if (target instanceof HTMLElement && target.isContentEditable) return true;
+    return target instanceof HTMLInputElement && !["range", "checkbox", "radio", "button"].includes(target.type);
+  }
+
+  /** @param {KeyboardEvent} evt */
+  function onWindowKeydown(evt) {
+    if (!clientIdConfigured) return;
+    const typing = isTextField(evt.target);
+    const ctrl = evt.ctrlKey || evt.metaKey;
+    if (evt.altKey && (evt.key === "ArrowLeft" || evt.key === "ArrowRight")) {
+      evt.preventDefault();
+      if (evt.key === "ArrowLeft") goBack();
+      else goForward();
+    } else if (ctrl && !evt.shiftKey && !evt.altKey && (evt.key === "s" || evt.key === "r")) {
+      evt.preventDefault();
+      if (evt.key === "s") toggleShuffle();
+      else cycleRepeatMode();
+    } else if (!typing && ctrl && !evt.shiftKey && !evt.altKey && evt.key.startsWith("Arrow")) {
+      evt.preventDefault();
+      if (evt.key === "ArrowRight") next();
+      else if (evt.key === "ArrowLeft") previousOrRestart();
+      else if (evt.key === "ArrowUp") setVolume(Math.min(100, player.volume + VOLUME_STEP));
+      else if (evt.key === "ArrowDown") setVolume(Math.max(0, player.volume - VOLUME_STEP));
+    } else if (!typing && evt.shiftKey && !ctrl && (evt.key === "ArrowLeft" || evt.key === "ArrowRight")) {
+      evt.preventDefault();
+      if (player.track) {
+        const step = evt.key === "ArrowRight" ? SEEK_STEP_MS : -SEEK_STEP_MS;
+        seekTo(Math.min(Math.max(player.positionMs + step, 0), player.track.durationMs));
+      }
+    } else if (!typing && !ctrl && !evt.altKey && evt.key.toLowerCase() === "m") {
+      toggleMute();
+    } else if (((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "f") || (!typing && evt.key === "/")) {
+      evt.preventDefault();
+      searchInput?.focus();
+      searchInput?.select();
+    } else if (!typing && evt.code === "Space" && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
+      evt.preventDefault();
+      if (!evt.repeat) togglePlay();
+    }
+  }
+
+  /** @param {MouseEvent} evt */
+  function onWindowMouseUp(evt) {
+    if (evt.button === 3) goBack();
+    else if (evt.button === 4) goForward();
+  }
+
+  onMount(() => {
+    api.setLoginExpiredHandler(onLoginExpired);
+    const stopListening = listen("playback-connection", (event) => {
+      playbackConnected = /** @type {boolean} */ (event.payload);
+      playbackStatus = playbackConnected ? "Playback connected" : "Not connected";
+    });
+    api.hasClientId().then((configured) => {
+      clientIdConfigured = configured;
+      if (configured) restoreSessionIfPossible();
+    });
+    return () => {
+      stopListening.then((stop) => stop());
+    };
   });
 
   function onClientIdSaved() {
     clientIdConfigured = true;
+    changingClientId = false;
     restoreSessionIfPossible();
   }
 
+  function changeClientId() {
+    changingClientId = true;
+    clientIdConfigured = false;
+  }
+
+  function cancelClientIdChange() {
+    changingClientId = false;
+    clientIdConfigured = true;
+  }
+
+  /** @param {string} name */
+  async function onLoggedIn(name) {
+    loggedIn = true;
+    restoreFailed = false;
+    displayName = name;
+    status = `Logged in as ${name}`;
+    loadLibrary();
+    if (!playbackConnected && !connecting && (await api.hasConnectSession())) {
+      connectPlayback(false);
+    }
+  }
+
+  function onLoginExpired() {
+    if (!loggedIn && !restoring) return;
+    loggedIn = false;
+    displayName = "";
+    status = "Not logged in";
+    clearLibrary();
+    notify(api.LOGIN_EXPIRED);
+  }
+
   async function restoreSessionIfPossible() {
+    restoreFailed = false;
     try {
-      if (await api.loginStatus()) {
-        const displayName = await api.restoreSession();
-        status = `Logged in as ${displayName}`;
-        
-        if (await api.hasConnectSession()) {
-          connectPlayback();
-        }
-      }
+      if (!(await api.loginStatus())) return;
+      restoring = true;
+      status = "Restoring session...";
+      await onLoggedIn(await api.restoreSession());
     } catch (e) {
-      
+      if (e === api.LOGIN_EXPIRED) return;
+      restoreFailed = true;
+      status = "Couldn't reach Spotify";
+      notify(`Couldn't restore your session: ${e}`);
+    } finally {
+      restoring = false;
     }
   }
 
   async function login() {
+    const previousStatus = status;
     loggingIn = true;
-    status = "Opening browser...";
+    restoreFailed = false;
+    status = "Waiting for the browser...";
     try {
-      const displayName = await api.login();
-      status = `Logged in as ${displayName}`;
-      sidebar?.load();
+      await onLoggedIn(await api.login());
     } catch (e) {
-      status = `Login failed: ${e}`;
+      status = loggedIn ? previousStatus : "Not logged in";
+      if (e !== api.LOGIN_CANCELLED) notify(`Login failed: ${e}`);
     } finally {
       loggingIn = false;
     }
+  }
+
+  function cancelLogin() {
+    api.cancelLogin().catch(() => {});
   }
 
   async function logout() {
     loggingOut = true;
     try {
       await api.logout();
+      loggedIn = false;
+      displayName = "";
       status = "Not logged in";
-      sidebar?.load();
+      clearLibrary();
+      likedIds.clear();
+      clearPlaylistCache();
+      clearStatsCache();
+      resetQueue();
+      resetPlayer();
+      resetNav();
     } catch (e) {
-      status = `Logout failed: ${e}`;
+      notify(`Logout failed: ${e}`);
     } finally {
       loggingOut = false;
     }
   }
 
-  async function connectPlayback() {
+  function relogin() {
+    login();
+  }
+
+  /** @param {boolean} interactive */
+  async function connectPlayback(interactive) {
+    if (connecting || playbackConnected) return;
     connecting = true;
-    playbackStatus = "Opening browser...";
+    connectingInteractive = interactive;
     try {
-      await api.connectPlayback();
-      playbackStatus = "Connected";
+      playbackStatus = (await api.hasConnectSession()) ? "Connecting..." : "Waiting for the browser...";
+      await api.connectPlayback(interactive);
+      playbackConnected = true;
+      playbackStatus = "Playback connected";
     } catch (e) {
-      playbackStatus = `Connect failed: ${e}`;
+      playbackStatus = "Not connected";
+      if (interactive && e !== api.LOGIN_CANCELLED) notify(`Couldn't connect playback: ${e}`);
     } finally {
       connecting = false;
     }
   }
 </script>
 
-<svelte:window onclick={onWindowClick} />
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKeydown} onmouseup={onWindowMouseUp} />
 
-<UpdateBanner />
+<div class="shell">
+{#if !miniMode}
+  <UpdateBanner />
+{/if}
 
-{#if clientIdConfigured === false}
-  <ClientIdSetup onSaved={onClientIdSaved} />
+{#if miniMode}
+  <MiniPlayer onExpand={() => setMiniMode(false)} />
+{:else if clientIdConfigured === false}
+  <div class="setup-titlebar" data-tauri-drag-region="deep">
+    <span class="setup-title">SpotiLarp</span>
+    <WindowControls />
+  </div>
+  <ClientIdSetup onSaved={onClientIdSaved} onCancel={changingClientId ? cancelClientIdChange : undefined} />
 {:else if clientIdConfigured === true}
 
 <div class="app">
-  <header class="topbar">
-    <h1><span class="dot" class:on={status.startsWith("Logged in")}></span>SpotiLarp</h1>
+  <header class="topbar" data-tauri-drag-region="deep">
+    <h1><span class="dot" class:on={loggedIn}></span>SpotiLarp</h1>
 
     <div class="search-group">
+      <button type="button" class="panel-toggle" onclick={goBack} disabled={nav.back.length === 0} aria-label="Back" title="Back (Alt+Left)">
+        <Icon name="chevron-left" size={18} />
+      </button>
+      <button type="button" class="panel-toggle" onclick={goForward} disabled={nav.forward.length === 0} aria-label="Forward" title="Forward (Alt+Right)">
+        <Icon name="chevron-right" size={18} />
+      </button>
       <button
         type="button"
         class="panel-toggle"
-        onclick={() => {
-          showLyrics = false;
-          selectedPlaylist = null;
-        }}
+        class:active={nav.view.type === "home" && !nav.lyrics}
+        onclick={() => navigate({ type: "home" })}
         aria-label="Home"
       >
         <Icon name="home" size={18} />
       </button>
 
-      <div class="search-box" bind:this={searchBox}>
+      <div class="search-box" bind:this={searchBox} data-tauri-drag-region="false">
         <div class="search-bar">
           <Icon name="search" size={18} class="search-icon" />
           <input
             type="text"
-            placeholder="Search tracks..."
+            placeholder="Search (Ctrl+F)"
             bind:value={searchQuery}
+            bind:this={searchInput}
             oninput={onSearchInput}
             onfocus={onSearchFocus}
             onkeydown={onSearchKeydown}
             class="search-input"
+            spellcheck="false"
           />
         </div>
         {#if showDropdown && searchQuery.trim()}
           <div class="search-dropdown">
-            {#if searching}
+            {#if searchPending}
               <div class="dropdown-status">Searching...</div>
             {:else if searchError}
               <div class="dropdown-status error">{searchError}</div>
-            {:else if searchResults.length === 0}
+            {:else if shownResults.length === 0}
               <div class="dropdown-status">No results for "{searchQuery}"</div>
             {:else}
-              {#each searchResults.slice(0, 8) as track}
-                <button type="button" class="dropdown-item" onclick={() => pickResult(track)}>
+              {#each shownResults as track, i}
+                <button
+                  type="button"
+                  class="dropdown-item"
+                  class:highlighted={i === highlighted}
+                  onclick={() => pickResult(i)}
+                  oncontextmenu={(e) => openTrackMenu(e, track)}
+                  onmouseenter={() => (highlighted = i)}
+                >
                   {#if smallestCover(track.album.images)}
                     <img src={smallestCover(track.album.images)} alt="" class="dropdown-thumb" />
                   {:else}
@@ -215,38 +449,79 @@
                   </div>
                 </button>
               {/each}
+              <button type="button" class="dropdown-item see-all" onclick={openSearchPage}>
+                See all results for "{searchQuery.trim()}"
+              </button>
             {/if}
           </div>
         {/if}
       </div>
     </div>
 
+    <div class="topbar-right">
     <div class="account-controls">
-      <span class="status-text">{status}</span>
-      {#if status.startsWith("Logged in")}
-        <button onclick={logout} disabled={loggingOut} class="pill-button">
+      <span class="status-text wide-only">{status}</span>
+      {#if loggingIn}
+        <button type="button" onclick={cancelLogin} class="pill-button">Cancel</button>
+      {:else if loggedIn}
+        <button onclick={logout} disabled={loggingOut} class="pill-button wide-only">
           {loggingOut ? "Logging out..." : "Log out"}
         </button>
       {:else}
-        <button onclick={login} disabled={loggingIn} class="pill-button primary">
-          {loggingIn ? "Logging in..." : "Log in with Spotify"}
+        {#if restoreFailed}
+          <button onclick={restoreSessionIfPossible} disabled={restoring} class="pill-button primary">Retry</button>
+        {/if}
+        <button onclick={login} disabled={restoring} class="pill-button" class:primary={!restoreFailed}>
+          Log in with Spotify
         </button>
+        {#if !restoring}
+          <button type="button" onclick={changeClientId} class="text-button wide-only">Change Client ID</button>
+        {/if}
       {/if}
-      <span class="status-text">{playbackStatus}</span>
-      <button onclick={connectPlayback} disabled={connecting} class="pill-button">
-        {connecting ? "Connecting..." : "Connect playback"}
-      </button>
+      {#if !playbackConnected}
+        <span class="status-text wide-only">{playbackStatus}</span>
+        {#if connecting && connectingInteractive}
+          <button type="button" onclick={cancelLogin} class="pill-button">Cancel</button>
+        {:else if connecting}
+          <button class="pill-button" disabled>Connecting...</button>
+        {:else}
+          <button onclick={() => connectPlayback(true)} class="pill-button">Connect playback</button>
+        {/if}
+      {/if}
+      <div class="narrow-only">
+        <AccountMenu initial={loggedIn ? displayName.charAt(0) : ""} label={status}>
+          <div class="menu-status">{status}</div>
+          <div class="menu-status">{playbackConnected ? "Playback connected" : `Playback: ${playbackStatus}`}</div>
+          {#if loggedIn}
+            <button onclick={logout} disabled={loggingOut} class="pill-button">
+              {loggingOut ? "Logging out..." : "Log out"}
+            </button>
+          {:else if !loggingIn && !restoring}
+            <button type="button" onclick={changeClientId} class="text-button menu-link">Change Client ID</button>
+          {/if}
+        </AccountMenu>
+      </div>
       <button
         type="button"
         class="panel-toggle"
-        class:active={showLyrics}
-        onclick={() => (showLyrics = !showLyrics)}
-        aria-label={showLyrics ? "Hide lyrics" : "Show lyrics"}
-        aria-pressed={showLyrics}
+        class:active={nav.lyrics}
+        onclick={() => (nav.lyrics = !nav.lyrics)}
+        aria-label={nav.lyrics ? "Hide lyrics" : "Show lyrics"}
+        aria-pressed={nav.lyrics}
       >
         <Icon name="lyrics" size={18} />
       </button>
       <DiscordRpcSettings />
+      <button
+        type="button"
+        class="panel-toggle"
+        class:active={nav.view.type === "settings" && !nav.lyrics}
+        onclick={() => navigate({ type: "settings" })}
+        aria-label="Settings"
+        title="Settings"
+      >
+        <Icon name="settings" size={18} />
+      </button>
       <button
         type="button"
         class="panel-toggle"
@@ -258,32 +533,38 @@
         <Icon name="panel-right" size={18} />
       </button>
     </div>
+    <WindowControls />
+    </div>
   </header>
 
   <div class="body">
     <aside class="sidebar-area">
-      <PlaylistSidebar
-        bind:this={sidebar}
-        selectedId={selectedPlaylist?.id}
-        onSelect={(p) => {
-          selectedPlaylist = p;
-          showLyrics = false;
-        }}
-      />
+      <PlaylistSidebar {loggedIn} />
     </aside>
     <main class="content-area">
-      <MainContent {selectedPlaylist} {showLyrics} />
+      <MainContent {loggedIn} {loggingIn} onRelogin={relogin} />
     </main>
     <div class="panel-area" class:collapsed={!showPanel}>
-      <NowPlayingPanel contextName={selectedPlaylist?.name} onClose={() => (showPanel = false)} />
+      {#if panelView === "queue"}
+        <QueuePanel onClose={() => (panelView = "nowPlaying")} />
+      {:else}
+        <NowPlayingPanel contextName={contextLabel() || null} onClose={() => (showPanel = false)} />
+      {/if}
     </div>
   </div>
 
   <footer class="now-playing-bar">
-    <NowPlaying />
+    <NowPlaying
+      queueOpen={showPanel && panelView === "queue"}
+      onToggleQueue={toggleQueue}
+      onMiniMode={() => setMiniMode(true)}
+    />
   </footer>
 </div>
 {/if}
+<Toasts />
+<TrackContextMenu />
+</div>
 
 <style>
 @font-face {
@@ -456,10 +737,18 @@
   to { background-position: -50% 0; }
 }
 
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
 .app {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -572,7 +861,8 @@ h1 {
   color: inherit;
   transition: background-color var(--transition);
 }
-.dropdown-item:hover {
+.dropdown-item:hover,
+.dropdown-item.highlighted {
   background-color: var(--surface-hover);
 }
 .dropdown-thumb {
@@ -620,13 +910,60 @@ h1 {
   opacity: 1;
 }
 
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  justify-self: end;
+  align-self: stretch;
+}
+.topbar-right > :global(.window-controls) {
+  margin: -0.75em -1.25em -0.75em 0;
+}
+
 .account-controls {
   display: flex;
   align-items: center;
   gap: 0.75em;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  justify-self: end;
+}
+
+.narrow-only {
+  display: none;
+}
+@media (max-width: 1679px) {
+  .wide-only {
+    display: none;
+  }
+  .narrow-only {
+    display: block;
+  }
+}
+
+.menu-status {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.menu-link {
+  align-self: flex-start;
+  font-size: var(--fs-sm);
+}
+
+.setup-titlebar {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  height: 36px;
+  flex-shrink: 0;
+  padding-left: 1em;
+  background: var(--bg);
+}
+.setup-title {
+  align-self: center;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
 }
 
 .status-text {
@@ -726,6 +1063,21 @@ h1 {
   transform: scale(1.04);
 }
 
+.text-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.text-button:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .panel-toggle {
   display: flex;
   align-items: center;
@@ -743,6 +1095,20 @@ h1 {
 .panel-toggle:hover {
   background-color: var(--surface-hover);
   color: var(--text);
+}
+.panel-toggle:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
+  color: var(--text-muted);
+}
+.dropdown-item.see-all {
+  justify-content: center;
+  padding: 0.7em;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--text-dim);
 }
 .panel-toggle.active {
   color: var(--accent);

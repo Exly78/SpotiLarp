@@ -7,12 +7,12 @@
   let update = $state(null);
   let installing = $state(false);
   let error = $state("");
+  let dismissed = $state(false);
 
   onMount(async () => {
     try {
       update = await check();
     } catch (e) {
-      // No update server reachable, or no update found - fail silently.
     }
   });
 
@@ -30,7 +30,7 @@
   }
 </script>
 
-{#if update}
+{#if update && !dismissed}
   <div class="update-banner">
     <span class="text">
       {#if error}
@@ -42,6 +42,9 @@
     <button type="button" onclick={installUpdate} disabled={installing} class="update-button">
       {installing ? "Updating..." : "Update & restart"}
     </button>
+    {#if !installing}
+      <button type="button" onclick={() => (dismissed = true)} class="later-button">Later</button>
+    {/if}
   </div>
 {/if}
 
@@ -79,5 +82,18 @@
 .update-button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+.later-button {
+  padding: 0.4em 0.6em;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  font-family: inherit;
+  cursor: pointer;
+}
+.later-button:hover {
+  color: var(--text);
 }
 </style>

@@ -1,17 +1,13 @@
 <script>
-  import { onMount, onDestroy } from "svelte";
+  import { untrack } from "svelte";
   import { fade } from "svelte/transition";
-  import { listen } from "@tauri-apps/api/event";
   import * as api from "../api.js";
+  import { player, seekTo } from "../player.svelte.js";
 
-  /** @type {string|null} */
-  let trackName = $state(null);
-  let artists = $state("");
-  let album = $state("");
-  /** @type {string|null} */
-  let coverUrl = $state(null);
-  let durationMs = $state(0);
-  let positionMs = $state(0);
+  /** @type {{ visible?: boolean }} */
+  let { visible = true } = $props();
+
+  const MANUAL_SCROLL_GRACE_MS = 3000;
 
   let loading = $state(false);
   let error = $state("");
@@ -20,235 +16,102 @@
   /** @type {string|null} */
   let plain = $state(null);
   let instrumental = $state(false);
-  let loadedFor = $state("");
-
-  let avgColor = $state("");
-  let avgColorFor = "";
+  let loadedFor = "";
 
   /** @type {HTMLElement[]} */
   let lineEls = [];
-  /** @type {import("@tauri-apps/api/event").UnlistenFn|undefined} */
-  let unlisten;
+  /** @type {HTMLDivElement|undefined} */
+  let container = $state();
+  let manualScrollAt = 0;
+  let wasVisible = false;
 
   const activeIndex = $derived.by(() => {
     if (!synced) return -1;
     let idx = -1;
     for (let i = 0; i < synced.length; i++) {
-      if (synced[i].time_ms <= positionMs) idx = i;
+      if (synced[i].time_ms <= player.positionMs) idx = i;
       else break;
     }
     return idx;
   });
 
-  onMount(async () => {
-    unlisten = await listen("player-event", (event) => {
-      const e = event.payload;
-      switch (e.type) {
-        case "TrackChanged":
-          trackName = e.name;
-          artists = e.artists;
-          album = e.album;
-          coverUrl = e.cover_url;
-          durationMs = e.duration_ms;
-          positionMs = 0;
-          break;
-        case "Playing":
-        case "Paused":
-        case "PositionChanged":
-        case "Seeked":
-          positionMs = e.position_ms;
-          break;
-      }
-    });
-  });
-
-  onDestroy(() => {
-    unlisten?.();
-  });
-
   $effect(() => {
-    const key = trackName ? `${trackName}::${artists}::${album}` : null;
-    if (key && key !== loadedFor) {
-      loadLyrics();
-    }
+    const track = player.track;
+    if (!track || !visible) return;
+    const key = `${track.name}::${track.artists}::${track.album}`;
+    if (key !== loadedFor) untrack(() => loadLyrics(track, key));
   });
 
-  async function loadLyrics() {
-    loadedFor = `${trackName}::${artists}::${album}`;
+  /**
+   * @param {import("../player.svelte.js").CurrentTrack} track
+   * @param {string} key
+   */
+  async function loadLyrics(track, key) {
+    loadedFor = key;
     loading = true;
     error = "";
     synced = null;
     plain = null;
     instrumental = false;
     try {
-      const firstArtist = artists.split(",")[0]?.trim() ?? artists;
-      const result = await api.getLyrics(/** @type {string} */ (trackName), firstArtist, album, durationMs);
+      const firstArtist = track.artists.split(",")[0]?.trim() ?? track.artists;
+      const result = await api.getLyrics(track.name, firstArtist, track.album, track.durationMs);
+      if (loadedFor !== key) return;
       if (result) {
         instrumental = result.instrumental;
         synced = result.synced && result.synced.length > 0 ? result.synced : null;
         plain = result.plain;
       }
     } catch (e) {
-      error = `Failed to load lyrics: ${e}`;
+      if (loadedFor === key) error = `Failed to load lyrics: ${e}`;
     } finally {
-      loading = false;
+      if (loadedFor === key) loading = false;
     }
+  }
+
+  /** @param {ScrollBehavior} behavior */
+  function scrollToActive(behavior) {
+    const el = lineEls[activeIndex];
+    if (!container || !el) return;
+    const top = el.offsetTop - container.clientHeight / 2 + el.offsetHeight / 2;
+    container.scrollTo({ top, behavior });
   }
 
   $effect(() => {
-    if (activeIndex >= 0 && lineEls[activeIndex]) {
-      lineEls[activeIndex].scrollIntoView({ behavior: "smooth", block: "center" });
-    }
+    const idx = activeIndex;
+    const shown = visible;
+    untrack(() => {
+      const justShown = shown && !wasVisible;
+      wasVisible = shown;
+      if (!shown || idx < 0) return;
+      if (justShown) {
+        manualScrollAt = 0;
+        scrollToActive("auto");
+      } else if (performance.now() - manualScrollAt > MANUAL_SCROLL_GRACE_MS) {
+        scrollToActive("smooth");
+      }
+    });
   });
 
-  $effect(() => {
-    if (coverUrl && coverUrl !== avgColorFor) {
-      avgColorFor = coverUrl;
-      extractAverageColor(coverUrl);
-    } else if (!coverUrl) {
-      avgColorFor = "";
-      avgColor = "";
-    }
-  });
-
-  /** @param {string} url */
-  function extractAverageColor(url) {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const size = 32;
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, size, size);
-        const { data } = ctx.getImageData(0, 0, size, size);
-
-        const bucketCount = 24;
-        const buckets = Array.from({ length: bucketCount }, () => ({ count: 0, hSum: 0, sSum: 0, lSum: 0 }));
-        let sampled = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          const [h, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
-          sampled++;
-          if (l < 8 || l > 92 || s < 10) continue;
-          const bucket = buckets[Math.floor(h / (360 / bucketCount)) % bucketCount];
-          bucket.count++;
-          bucket.hSum += h;
-          bucket.sSum += s;
-          bucket.lSum += l;
-        }
-
-        let best = null;
-        let bestScore = 0;
-        for (const bucket of buckets) {
-          if (bucket.count === 0) continue;
-          const avgS = bucket.sSum / bucket.count;
-          const score = bucket.count * avgS;
-          if (score > bestScore) {
-            bestScore = score;
-            best = { h: bucket.hSum / bucket.count, s: avgS, l: bucket.lSum / bucket.count, count: bucket.count };
-          }
-        }
-
-        if (coverUrl === url) {
-          avgColor = best && best.count / sampled >= 0.03 ? vividize(best.h, best.s, best.l) : "";
-        }
-      } catch {
-        
-        if (coverUrl === url) avgColor = "";
-      }
-    };
-    img.onerror = () => {
-      if (coverUrl === url) avgColor = "";
-    };
-    img.src = url;
+  function onManualScroll() {
+    manualScrollAt = performance.now();
   }
 
-  /**
-   * @param {number} h
-   * @param {number} s
-   * @param {number} l
-   */
-  function vividize(h, s, l) {
-    if (s >= 35) {
-      const boundedS = Math.min(62, s);
-      const boundedL = Math.min(46, Math.max(l, 26));
-      const [r, g, b] = hslToRgb(h, boundedS, boundedL);
-      return `rgb(${r}, ${g}, ${b})`;
-    }
-    const boundedL = Math.min(30, Math.max(l * 0.55, 12));
-    const [r, g, b] = hslToRgb(h, s, boundedL);
-    return `rgb(${r}, ${g}, ${b})`;
+  /** @param {number} timeMs */
+  function seekToLine(timeMs) {
+    manualScrollAt = 0;
+    seekTo(timeMs);
   }
 
-  /**
-   * @param {number} r
-   * @param {number} g
-   * @param {number} b
-   */
-  function rgbToHsl(r, g, b) {
-    r /= 255;
-    g /= 255;
-    b /= 255;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0;
-    let s = 0;
-    const l = (max + min) / 2;
-    if (max !== min) {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max) {
-        case r:
-          h = (g - b) / d + (g < b ? 6 : 0);
-          break;
-        case g:
-          h = (b - r) / d + 2;
-          break;
-        default:
-          h = (r - g) / d + 4;
-      }
-      h /= 6;
-    }
-    return [h * 360, s * 100, l * 100];
-  }
-
-  /**
-   * @param {number} h
-   * @param {number} s
-   * @param {number} l
-   */
-  function hslToRgb(h, s, l) {
-    h /= 360;
-    s /= 100;
-    l /= 100;
-    if (s === 0) {
-      const v = Math.round(l * 255);
-      return [v, v, v];
-    }
-    /** @param {number} p @param {number} q @param {number} t */
-    const hue2rgb = (p, q, t) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    return [
-      Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
-      Math.round(hue2rgb(p, q, h) * 255),
-      Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
-    ];
-  }
 </script>
 
-<div class="lyrics" style={avgColor ? `--avg-color: ${avgColor}` : ""}>
-  {#if !trackName}
+<div
+  class="lyrics"
+  style={player.color ? `--avg-color: ${player.color}` : ""}
+  bind:this={container}
+  onwheel={onManualScroll}
+>
+  {#if !player.track}
     <div class="empty-state" transition:fade={{ duration: 150 }}>Nothing playing.</div>
   {:else if loading}
     <ul class="skeleton-list" transition:fade={{ duration: 150 }}>
@@ -263,14 +126,16 @@
   {:else if synced}
     <div class="synced-lines" transition:fade={{ duration: 150 }}>
       {#each synced as line, i}
-        <p
+        <button
+          type="button"
           bind:this={lineEls[i]}
           class="line"
           class:active={i === activeIndex}
           class:past={i < activeIndex}
+          onclick={() => seekToLine(line.time_ms)}
         >
           {line.text || " "}
-        </p>
+        </button>
       {/each}
     </div>
   {:else if plain}
@@ -326,6 +191,20 @@
   color: color-mix(in srgb, var(--avg-color, var(--surface-raised)) 55%, white 45%);
   transition: color var(--transition), transform var(--transition);
   transform-origin: left center;
+}
+.synced-lines .line {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.synced-lines .line:hover:not(.active) {
+  color: color-mix(in srgb, var(--avg-color, var(--surface-raised)) 25%, white 75%);
 }
 .synced-lines .line.past {
   color: color-mix(in srgb, var(--avg-color, var(--surface-raised)) 75%, white 25%);

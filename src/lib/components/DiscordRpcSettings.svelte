@@ -38,9 +38,12 @@
 
   async function disable() {
     saving = true;
+    error = "";
     try {
       await api.clearDiscordClientId();
       enabled = false;
+    } catch (e) {
+      error = `${e}`;
     } finally {
       saving = false;
     }
@@ -60,7 +63,7 @@
 
 <svelte:window onclick={onWindowClick} />
 
-<div class="discord-settings" bind:this={root}>
+<div class="discord-settings" bind:this={root} data-tauri-drag-region="false">
   <button
     type="button"
     class="panel-toggle"
@@ -76,6 +79,9 @@
     <div class="popover">
       {#if enabled}
         <p class="intro">Discord Rich Presence is on, your listening activity shows on your profile.</p>
+        {#if error}
+          <p class="error">{error}</p>
+        {/if}
         <button type="button" onclick={disable} disabled={saving} class="save-button danger">
           {saving ? "Disabling..." : "Disable"}
         </button>
