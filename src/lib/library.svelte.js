@@ -1,7 +1,7 @@
 import * as api from "./api.js";
 
-/** @type {{ playlists: import("./types.js").Playlist[], loading: boolean, error: string, userId: string|null, missingScopes: string[] }} */
-export const library = $state({ playlists: [], loading: false, error: "", userId: null, missingScopes: [] });
+/** @type {{ playlists: import("./types.js").Playlist[], albums: import("./types.js").Album[], loading: boolean, error: string, userId: string|null, missingScopes: string[] }} */
+export const library = $state({ playlists: [], albums: [], loading: false, error: "", userId: null, missingScopes: [] });
 
 let loadToken = 0;
 
@@ -9,6 +9,12 @@ export async function loadLibrary() {
   const token = ++loadToken;
   library.loading = true;
   library.error = "";
+  api
+    .getSavedAlbums()
+    .then((albums) => {
+      if (token === loadToken) library.albums = albums;
+    })
+    .catch(() => {});
   try {
     const [playlists, userId] = await Promise.all([api.getPlaylists(), api.getUserId()]);
     if (token !== loadToken) return;
@@ -28,6 +34,7 @@ export async function loadLibrary() {
 export function clearLibrary() {
   loadToken++;
   library.playlists = [];
+  library.albums = [];
   library.error = "";
   library.loading = false;
   library.userId = null;
@@ -74,4 +81,25 @@ export async function renamePlaylist(playlistId, name) {
 export async function deletePlaylist(playlistId) {
   await api.removePlaylist(playlistId);
   library.playlists = library.playlists.filter((p) => p.id !== playlistId);
+}
+
+/** @param {string|undefined} albumId */
+export function isAlbumSaved(albumId) {
+  return !!albumId && library.albums.some((a) => a.id === albumId);
+}
+
+/** @param {import("./types.js").Album} album */
+export async function saveAlbum(album) {
+  const id = album.id;
+  if (!id) return;
+  await api.saveAlbum(id);
+  if (isAlbumSaved(id)) return;
+  const { name, images, artists, release_date, album_type, total_tracks } = album;
+  library.albums.unshift({ id, name, images, artists, release_date, album_type, total_tracks });
+}
+
+/** @param {string} albumId */
+export async function removeAlbum(albumId) {
+  await api.removeAlbum(albumId);
+  library.albums = library.albums.filter((a) => a.id !== albumId);
 }

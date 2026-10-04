@@ -105,21 +105,26 @@ export const searchAll = (query) => invoke("search_all", { query });
 export const searchTracksPage = (query, offset) => invoke("search_tracks_page", { query, offset });
 /**
  * @param {string} artistId
- * @returns {Promise<import("./types.js").Album[]>}
+ * @returns {Promise<import("./types.js").ArtistPage>}
  */
-export const getArtistAlbums = (artistId) => invoke("get_artist_albums", { artistId });
+export const getArtistPage = (artistId) => invoke("get_artist_page", { artistId });
 /**
  * @param {string} artistId
- * @param {string} artistName
- * @returns {Promise<import("./types.js").Track[]>}
+ * @param {import("./types.js").ReleaseGroup} group
+ * @returns {Promise<import("./types.js").Album[]>}
  */
-export const getArtistPopularTracks = (artistId, artistName) =>
-  invoke("get_artist_popular_tracks", { artistId, artistName });
+export const getArtistDiscography = (artistId, group) => invoke("get_artist_discography", { artistId, group });
 /**
  * @param {string} albumId
  * @returns {Promise<import("./types.js").AlbumDetails>}
  */
 export const getAlbum = (albumId) => invoke("get_album", { albumId });
+/** @returns {Promise<import("./types.js").Album[]>} */
+export const getSavedAlbums = () => invoke("get_saved_albums");
+/** @param {string} albumId */
+export const saveAlbum = (albumId) => invoke("save_album", { albumId });
+/** @param {string} albumId */
+export const removeAlbum = (albumId) => invoke("remove_album", { albumId });
 /** @returns {Promise<import("./types.js").Track[]>} */
 export const getRecentlyPlayed = () => invoke("get_recently_played");
 /**
@@ -190,3 +195,9 @@ export const listOutputDevices = () => invoke("list_output_devices");
  * @param {number[]} gains
  */
 export const previewEqualizer = (enabled, gains) => invoke("preview_equalizer", { enabled, gains });
+/** @returns {Promise<string|null>} */
+export const pickFolder = () => invoke("pick_folder");
+/** @returns {Promise<import("./types.js").LocalLibrary>} */
+export const getLocalFiles = () => invoke("get_local_files");
+/** @returns {Promise<import("./types.js").LocalLibrary>} */
+export const rescanLocalFiles = () => invoke("rescan_local_files");

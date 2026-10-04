@@ -19,6 +19,7 @@ const RESTART_THRESHOLD_MS = 3000;
  * @property {string|null} primaryArtistId
  * @property {{ id: string|null, name: string }[]} [artistList]
  * @property {string|null} trackId
+ * @property {string} [uri]
  * @property {string} album
  * @property {number} durationMs
  * @property {string|null} coverUrl
@@ -113,6 +114,7 @@ listen("player-event", (event) => {
         primaryArtistId: e.primary_artist_id ?? null,
         artistList: e.artist_list ?? [],
         trackId: e.track_id ?? null,
+        uri: e.uri ?? "",
         album: e.album ?? "",
         durationMs: e.duration_ms ?? 0,
         coverUrl: e.cover_url ?? null,

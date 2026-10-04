@@ -7,15 +7,20 @@
   import { openTrackMenu } from "../contextMenu.svelte.js";
   import { openArtist, openAlbum } from "../nav.svelte.js";
   import { drag, startTrackDrag, endDrag, insertionIndex } from "../drag.svelte.js";
-  import { smallestCover, formatTime } from "../utils.js";
+  import { smallestCover, formatTime, formatCount } from "../utils.js";
   import Icon from "./Icon.svelte";
 
   /**
+   * Rows may carry `playcount` and `explicit` (an artist's popular tracks do).
    * @type {{
-   *   tracks: import("../types.js").Track[],
+   *   tracks: (import("../types.js").Track & { playcount?: number|null, explicit?: boolean })[],
    *   contextName?: string,
+   *   allTracks?: import("../types.js").Track[],
+   *   showHeader?: boolean,
+   *   showArtists?: boolean,
    *   showAlbum?: boolean,
    *   showDateAdded?: boolean,
+   *   showPlaycount?: boolean,
    *   showCovers?: boolean,
    *   onRemove?: (track: import("../types.js").Track) => void,
    *   onReorder?: (from: number, insertBefore: number) => void,
@@ -24,8 +29,13 @@
   let {
     tracks,
     contextName = "",
+    // When `tracks` shows only the first few of a list, the whole list to queue.
+    allTracks,
+    showHeader = true,
+    showArtists = true,
     showAlbum = true,
     showDateAdded = false,
+    showPlaycount = false,
     showCovers = true,
     onRemove,
     onReorder,
@@ -98,19 +108,27 @@
   }
 </script>
 
-<ul class="track-list" class:with-album={showAlbum} class:with-date={showDateAdded}>
-  <li class="row header" aria-hidden="true">
-    <span class="index">#</span>
-    <span class="title-cell">Title</span>
-    {#if showAlbum}<span class="album-cell">Album</span>{/if}
-    {#if showDateAdded}<span class="date-cell">Date added</span>{/if}
-    <span></span>
-    <span class="duration"><Icon name="clock" size={15} /></span>
-  </li>
+<ul
+  class="track-list"
+  class:with-album={showAlbum}
+  class:with-date={showDateAdded}
+  class:with-plays={showPlaycount}
+>
+  {#if showHeader}
+    <li class="row header" aria-hidden="true">
+      <span class="index">#</span>
+      <span class="title-cell">Title</span>
+      {#if showAlbum}<span class="album-cell">Album</span>{/if}
+      {#if showDateAdded}<span class="date-cell">Date added</span>{/if}
+      {#if showPlaycount}<span class="plays-cell">Plays</span>{/if}
+      <span></span>
+      <span class="duration"><Icon name="clock" size={15} /></span>
+    </li>
+  {/if}
   {#each visible as track, i}
     <li
       class="row"
-      class:playing={!!track.id && track.id === player.track?.trackId}
+      class:playing={track.id ? track.id === player.track?.trackId : !!player.track?.uri && track.uri === player.track.uri}
       class:drop-before={dropIndex === i}
       class:drop-after={dropIndex === tracks.length && i === tracks.length - 1}
       draggable="true"
@@ -129,7 +147,7 @@
       <button
         type="button"
         class="hit"
-        onclick={() => playFromList(tracks, i, contextName)}
+        onclick={() => playFromList(allTracks ?? tracks, i, contextName)}
         aria-label={`Play ${track.name}`}
       ></button>
       <span class="index">{i + 1}</span>
@@ -143,11 +161,16 @@
         {/if}
         <div class="meta">
           <div class="name">{track.name}</div>
-          <div class="artists">
-            {#each track.artists as artist, j}
-              {#if j > 0},&nbsp;{/if}{#if artist.id}<button type="button" class="link" onclick={() => openArtist(artist)}>{artist.name}</button>{:else}<span>{artist.name}</span>{/if}
-            {/each}
-          </div>
+          {#if showArtists}
+            <div class="artists">
+              {#if track.explicit}<span class="explicit" title="Explicit">E</span>{/if}
+              {#each track.artists as artist, j}
+                {#if j > 0},&nbsp;{/if}{#if artist.id}<button type="button" class="link" onclick={() => openArtist(artist)}>{artist.name}</button>{:else}<span>{artist.name}</span>{/if}
+              {/each}
+            </div>
+          {:else if track.explicit}
+            <div class="artists"><span class="explicit" title="Explicit">E</span></div>
+          {/if}
         </div>
       </div>
       {#if showAlbum}
@@ -161,6 +184,9 @@
       {/if}
       {#if showDateAdded}
         <div class="date-cell">{formatDate(track.added_at)}</div>
+      {/if}
+      {#if showPlaycount}
+        <div class="plays-cell">{track.playcount != null ? formatCount(track.playcount) : ""}</div>
       {/if}
       {#if track.id}
         <button
@@ -213,6 +239,9 @@
 .with-album.with-date .row {
   grid-template-columns: 2.4em minmax(0, 1.5fr) minmax(0, 1fr) 8em 32px 3.6em;
 }
+.with-plays .row {
+  grid-template-columns: 2.4em minmax(0, 4fr) minmax(0, 2fr) 32px 3.6em;
+}
 @container tracks (max-width: 720px) {
   .with-album .row,
   .with-date .row,
@@ -221,6 +250,14 @@
   }
   .album-cell,
   .date-cell {
+    display: none;
+  }
+}
+@container tracks (max-width: 480px) {
+  .with-plays .row {
+    grid-template-columns: 2.4em minmax(0, 1fr) 32px 3.6em;
+  }
+  .plays-cell {
     display: none;
   }
 }
@@ -299,7 +336,8 @@
 }
 .artists,
 .album-cell,
-.date-cell {
+.date-cell,
+.plays-cell {
   font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
@@ -310,8 +348,28 @@
   margin-top: 0.15em;
 }
 .album-cell,
-.date-cell {
+.date-cell,
+.plays-cell {
   font-size: var(--fs-sm);
+}
+.plays-cell {
+  font-variant-numeric: tabular-nums;
+}
+.explicit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.45em;
+  height: 1.45em;
+  margin-right: 0.45em;
+  border-radius: 2px;
+  background: var(--text-muted);
+  color: var(--surface);
+  font-size: 0.7em;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  vertical-align: 0.1em;
 }
 .link {
   padding: 0;

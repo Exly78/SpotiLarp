@@ -4,5 +4,6 @@ pub mod client;
 pub mod home;
 pub mod library;
 pub mod models;
+pub mod pathfinder;
 pub mod playlists;
 pub mod search;

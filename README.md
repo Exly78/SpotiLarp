@@ -1,6 +1,6 @@
 # SpotiLarp
 
-![version](https://img.shields.io/badge/version-1.0.0-blue)
+![version](https://img.shields.io/badge/version-1.0.1-blue)
 ![status](https://img.shields.io/badge/status-early%20WIP-orange)
 ![last updated](https://img.shields.io/badge/last%20updated-2026--10--03-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -78,6 +78,11 @@ Produces a release binary and installer(s) for your platform under
   playback goes through librespot, which logs in as Spotify's official desktop app (that's
   the second browser login, "Connect playback"). This isn't an official Spotify API, so a
   change on Spotify's side can break playback until librespot catches up.
+- **Local Files plays songs from your computer.** Add music folders under Settings → Local
+  files (MP3, FLAC, M4A, OGG and WAV). Title, artist, album and cover art come from each
+  file's tags, or a `cover.jpg`/`folder.jpg` next to it. Local songs play through SpotiLarp's
+  own player, not librespot, so they work at any sample rate and don't need Premium. Hit
+  Rescan after adding new files.
 - **Lyrics come from [LRCLIB](https://lrclib.net).** While the lyrics view is open, the
   playing song's title, artist, album and length are sent to lrclib.net to look them up.
   Nothing is sent while lyrics are closed.

@@ -122,7 +122,72 @@ pub struct Followers {
     pub total: u32,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+/// Everything on an artist's page. Pathfinder fills all of it; the Web API
+/// fallback (no playback session) only the basics.
+#[derive(Default, Serialize)]
+pub struct ArtistPage {
+    pub id: String,
+    pub name: String,
+    pub images: Vec<Image>,
+    pub header_images: Vec<Image>,
+    pub color: Option<String>,
+    pub verified: bool,
+    pub monthly_listeners: Option<u64>,
+    pub followers: Option<u64>,
+    pub world_rank: Option<u64>,
+    pub genres: Vec<String>,
+    pub biography: Option<String>,
+    pub gallery: Vec<Vec<Image>>,
+    pub top_cities: Vec<TopCity>,
+    pub external_links: Vec<ExternalLink>,
+    pub following: Option<bool>,
+    pub top_tracks: Vec<PopularTrack>,
+    pub latest_release: Option<Album>,
+    pub popular_releases: Vec<Album>,
+    pub albums: Vec<Album>,
+    pub singles: Vec<Album>,
+    pub compilations: Vec<Album>,
+    pub album_count: u32,
+    pub single_count: u32,
+    pub compilation_count: u32,
+    pub related_artists: Vec<ArtistDetails>,
+    pub appears_on: Vec<Album>,
+    pub featuring: Vec<PlaylistCard>,
+    pub discovered_on: Vec<PlaylistCard>,
+    pub playlists: Vec<PlaylistCard>,
+}
+
+#[derive(Serialize)]
+pub struct PopularTrack {
+    #[serde(flatten)]
+    pub track: Track,
+    pub playcount: Option<u64>,
+    pub explicit: bool,
+}
+
+#[derive(Serialize)]
+pub struct TopCity {
+    pub city: String,
+    pub country: String,
+    pub listeners: u64,
+}
+
+#[derive(Serialize)]
+pub struct ExternalLink {
+    pub name: String,
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct PlaylistCard {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub images: Vec<Image>,
+    pub owner: Option<String>,
+}
+
+#[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Album {
     #[serde(default, deserialize_with = "null_as_default")]
     pub id: String,
@@ -236,6 +301,11 @@ impl SavedTrackItem {
         track.added_at = self.added_at;
         Some(track)
     }
+}
+
+#[derive(Deserialize)]
+pub struct SavedAlbumItem {
+    pub album: Option<Album>,
 }
 
 #[cfg(test)]

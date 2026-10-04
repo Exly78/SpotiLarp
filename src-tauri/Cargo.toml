@@ -1,6 +1,6 @@
 [package]
 name = "spotilarp"
-version = "1.0.0"
+version = "1.0.1"
 description = "A low-RAM Spotify client built with Rust + Tauri"
 authors = ["Exly"]
 edition = "2021"
@@ -29,7 +29,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 tokio = { version = "1", features = ["sync", "rt", "time"] }
 rand = "0.8"
 sha2 = "0.10"
@@ -40,11 +40,14 @@ url = "2"
 dirs = "6"
 librespot-core = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-metadata = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
-# Request/response types for Spotify's internal endpoints (autoplay).
+# Request/response types for Spotify's internal endpoints (autoplay, editing
+# playlists), and the protobuf runtime they're built on.
 librespot-protocol = "0.8.0"
-# Only "playback" (cpal output): we feed it raw decoded samples via
-# SamplesBuffer, so none of rodio's own file-format decoders are needed.
-rodio = { version = "0.21", default-features = false, features = ["playback"] }
+protobuf = "3.7"
+# "playback" (cpal output) for both players. Spotify audio arrives already decoded
+# by librespot; the decoders are for local files (playback/local.rs), since
+# librespot's own local-file support only handles 44.1 kHz stereo MP3/FLAC.
+rodio = { version = "0.21", default-features = false, features = ["playback", "mp3", "flac", "mp4", "symphonia-alac", "vorbis", "wav"] }
 # No "rodio-backend" feature: we ship our own sink (playback/sink.rs) that
 # fixes a pause/stop bug in librespot's built-in rodio backend, so its copy
 # of the rodio integration is unused dead weight.
@@ -61,6 +64,10 @@ tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+# Native folder picker for choosing local music folders (used from Rust only).
+tauri-plugin-dialog = "2"
+# Reads tags and embedded art from local files (the same symphonia rodio decodes them with).
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "isomp4", "aac", "alac", "ogg", "vorbis", "wav", "pcm"] }
 
 [profile.release]
 opt-level = 3

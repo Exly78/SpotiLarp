@@ -67,6 +67,20 @@ function extract(url) {
 }
 
 /**
+ * A color Spotify picked for an image ("#rrggbb"), toned like the ones taken
+ * from cover art so white text stays readable on it. Spotify's are often
+ * near-white.
+ * @param {string} hex
+ */
+export function tintFromHex(hex) {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return "";
+  const n = parseInt(match[1], 16);
+  const [h, s, l] = rgbToHsl((n >> 16) & 255, (n >> 8) & 255, n & 255);
+  return vividize(h, s, l);
+}
+
+/**
  * @param {number} h
  * @param {number} s
  * @param {number} l

@@ -5,6 +5,8 @@
   import { queue, toggleAutoplay } from "../../queue.svelte.js";
   import { sleep, setSleepTimer } from "../../sleep.svelte.js";
   import { notify } from "../../toast.svelte.js";
+  import { addLocalFolder, removeLocalFolder } from "../../localFiles.svelte.js";
+  import Icon from "../Icon.svelte";
   import Toggle from "../Toggle.svelte";
 
   const CACHE_SIZES = [
@@ -52,6 +54,7 @@
   let cacheBytes = $state(null);
   let saving = $state(false);
   let clearing = $state(false);
+  let choosingFolder = $state(false);
   /** @type {string[]} */
   let devices = $state([]);
   /** @type {number[]} */
@@ -119,6 +122,27 @@
       notify(`Couldn't save settings: ${e}`);
     } finally {
       saving = false;
+    }
+  }
+
+  async function addFolder() {
+    choosingFolder = true;
+    try {
+      const next = await addLocalFolder();
+      if (next) settings = next;
+    } catch (e) {
+      notify(`Couldn't add the folder: ${e}`);
+    } finally {
+      choosingFolder = false;
+    }
+  }
+
+  /** @param {string} folder */
+  async function removeFolder(folder) {
+    try {
+      settings = await removeLocalFolder(folder);
+    } catch (e) {
+      notify(`Couldn't remove the folder: ${e}`);
     }
   }
 
@@ -192,6 +216,52 @@
       </div>
       <Toggle on={queue.autoplay} onclick={toggleAutoplay} label="Autoplay" />
     </div>
+  </section>
+
+  <section>
+    <h2>Local files</h2>
+    <div class="row">
+      <div>
+        <div class="label">Music folders</div>
+        <div class="hint">
+          Songs in these folders show up in Local Files, with the title, artist, album and cover art read from each file.
+          MP3, FLAC, M4A, OGG and WAV.
+        </div>
+      </div>
+      <button type="button" class="secondary" onclick={addFolder} disabled={saving || choosingFolder}>
+        Add folder
+      </button>
+    </div>
+    <div class="row">
+      <div>
+        <div class="label">Show local covers on Discord</div>
+        <div class="hint">
+          Discord can only show images from the web, so a local song's cover is uploaded to Litterbox
+          (catbox.moe's temporary host, which deletes it after 3 days) while it's in your status.
+        </div>
+      </div>
+      <Toggle
+        on={settings.discord_local_covers}
+        onclick={() => update({ discord_local_covers: !settings?.discord_local_covers })}
+        label="Show local covers on Discord"
+        disabled={saving}
+      />
+    </div>
+    {#each settings.local_folders as folder (folder)}
+      <div class="folder">
+        <Icon name="folder" size={16} />
+        <span class="folder-path" title={folder}>{folder}</span>
+        <button
+          type="button"
+          class="remove-folder"
+          onclick={() => removeFolder(folder)}
+          aria-label={`Remove ${folder}`}
+          title="Remove"
+        >
+          <Icon name="close" size={14} />
+        </button>
+      </div>
+    {/each}
   </section>
 
   <section>
@@ -457,6 +527,38 @@ select {
 .gain {
   min-width: 2.2em;
   text-align: center;
+  color: var(--text);
+}
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin-bottom: 0.4em;
+  padding: 0.55em 0.6em 0.55em 0.9em;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+.folder-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.remove-folder {
+  display: flex;
+  padding: 0.35em;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition);
+}
+.remove-folder:hover {
   color: var(--text);
 }
 .chips {

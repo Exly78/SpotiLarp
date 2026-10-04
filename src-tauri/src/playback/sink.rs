@@ -28,6 +28,10 @@ pub fn set_output_device(name: Option<String>) {
     }
 }
 
+pub fn output_generation() -> u64 {
+    OUTPUT_GENERATION.load(Ordering::SeqCst)
+}
+
 pub fn output_device_names() -> Vec<String> {
     rodio::cpal::default_host()
         .output_devices()
@@ -47,7 +51,7 @@ pub fn open(_device: Option<String>, _format: AudioFormat) -> Box<dyn Sink> {
     })
 }
 
-fn open_output() -> SinkResult<(RodioSink, OutputStream)> {
+pub fn open_stream() -> SinkResult<OutputStream> {
     let wanted = OUTPUT_DEVICE.lock().ok().and_then(|name| name.clone());
     let chosen = wanted.and_then(|name| {
         rodio::cpal::default_host()
@@ -64,13 +68,18 @@ fn open_output() -> SinkResult<(RodioSink, OutputStream)> {
             .map_err(|e| SinkError::ConnectionRefused(format!("failed to open default audio output: {e}")))?,
     };
     stream.log_on_drop(false);
+    Ok(stream)
+}
+
+fn open_output() -> SinkResult<(RodioSink, OutputStream)> {
+    let stream = open_stream()?;
     let sink = RodioSink::connect_new(stream.mixer());
     Ok((sink, stream))
 }
 
 impl FixedRodioSink {
     fn ensure_output(&mut self) -> SinkResult<&RodioSink> {
-        let generation = OUTPUT_GENERATION.load(Ordering::SeqCst);
+        let generation = output_generation();
         if generation != self.generation {
             self.output = None;
         }

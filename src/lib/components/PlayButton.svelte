@@ -1,12 +1,12 @@
 <script>
   import Icon from "./Icon.svelte";
 
-  /** @type {{ onclick: () => void, disabled?: boolean, label: string }} */
-  let { onclick, disabled = false, label } = $props();
+  /** @type {{ onclick: () => void, disabled?: boolean, playing?: boolean, size?: number, label: string }} */
+  let { onclick, disabled = false, playing = false, size = 52, label } = $props();
 </script>
 
-<button type="button" class="play" {onclick} {disabled} aria-label={label}>
-  <Icon name="play" size={22} />
+<button type="button" class="play" style={`--size: ${size}px`} {onclick} {disabled} aria-label={playing ? "Pause" : label}>
+  <Icon name={playing ? "pause" : "play"} size={Math.round(size * 0.42)} />
 </button>
 
 <style>
@@ -14,8 +14,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: var(--size);
+  height: var(--size);
   flex-shrink: 0;
   border: none;
   border-radius: 50%;

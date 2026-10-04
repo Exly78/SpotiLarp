@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU16;
+use std::sync::atomic::{AtomicBool, AtomicU16};
 use std::sync::mpsc::Sender as StdSender;
 use std::sync::{Arc, OnceLock};
 
@@ -10,7 +10,10 @@ use tokio::sync::Mutex;
 
 use crate::config::Settings;
 use crate::discord::PresenceUpdate;
+use crate::local_files::LocalIndex;
 use crate::media::MediaUpdate;
+use crate::playback::events::EventSender;
+use crate::playback::local::LocalPlayer;
 use crate::spotify_api::client::SpotifyClient;
 
 pub struct PlaybackHandle {
@@ -34,6 +37,11 @@ pub struct AppState {
     pub mini_restore: std::sync::Mutex<Option<MiniRestore>>,
 
     pub discord: Mutex<Option<StdSender<PresenceUpdate>>>,
+    pub local_files: Mutex<Option<LocalIndex>>,
+    pub local_player: OnceLock<LocalPlayer>,
+    /// Whether the local player (rather than librespot) owns playback.
+    pub local_active: AtomicBool,
+    pub playback_events: OnceLock<EventSender>,
 }
 
 impl AppState {

@@ -7,13 +7,14 @@
    *   image?: string|null,
    *   round?: boolean,
    *   liked?: boolean,
+   *   icon?: string|null,
    *   label: string,
    *   title: string,
    *   meta?: import("svelte").Snippet,
    *   actions?: import("svelte").Snippet,
    * }}
    */
-  let { image = null, round = false, liked = false, label, title, meta, actions } = $props();
+  let { image = null, round = false, liked = false, icon = null, label, title, meta, actions } = $props();
 
   let tint = $state("");
 
@@ -21,6 +22,10 @@
     const url = image;
     if (liked) {
       tint = "rgb(80, 56, 160)";
+      return;
+    }
+    if (icon) {
+      tint = "rgb(22, 110, 72)";
       return;
     }
     dominantColor(url).then((color) => {
@@ -34,6 +39,8 @@
     <img src={image} alt="" class="art" class:round />
   {:else if liked}
     <div class="art liked"><Icon name="heart-filled" size={64} /></div>
+  {:else if icon}
+    <div class="art icon-art"><Icon name={icon} size={64} /></div>
   {:else}
     <div class="art placeholder" class:round></div>
   {/if}
@@ -82,6 +89,13 @@
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #4b1fa8, #8f8ff0);
+  color: #fff;
+}
+.art.icon-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0b4d33, #1ed760);
   color: #fff;
 }
 .text {

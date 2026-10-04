@@ -3,19 +3,23 @@ use std::sync::atomic::Ordering;
 use librespot_core::session::Session;
 use tauri::{AppHandle, Emitter, LogicalSize, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_dialog::DialogExt;
+use tokio::sync::{MappedMutexGuard, MutexGuard};
 
 use crate::auth::{loopback, oauth, AUTH_SCOPES, REDIRECT_PATH, REDIRECT_PORT};
 use crate::config::{self, Settings};
 use crate::discord;
 use crate::discord::PresenceUpdate;
+use crate::local_files::{self, LocalIndex, LocalLibrary};
 use crate::lyrics::{self, LyricsResult};
 use crate::media::MediaUpdate;
 use crate::playback;
+use crate::playback::local::LocalPlayer;
 use crate::spotify_api::album;
 use crate::spotify_api::artist;
 use crate::spotify_api::home;
 use crate::spotify_api::library;
-use crate::spotify_api::models::{Album, AlbumDetails, ArtistDetails, Playlist, SearchResults, Track};
+use crate::spotify_api::models::{Album, AlbumDetails, ArtistDetails, ArtistPage, Image, Playlist, SearchResults, Track};
 use crate::spotify_api::playlists;
 use crate::spotify_api::search::{self, search_tracks};
 use crate::state::{AppState, MiniRestore, PlaybackHandle};
@@ -75,6 +79,10 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), St
     state.spotify.lock().await.logout()?;
 
     let _connecting = state.playback_connect.lock().await;
+    state.local_active.store(false, Ordering::SeqCst);
+    if let Some(local) = state.local_player.get() {
+        local.stop();
+    }
     if let Some(handle) = state.playback.lock().await.take() {
         handle.player.stop();
         handle.session.shutdown();
@@ -169,7 +177,81 @@ pub async fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: 
     let session = old.session.clone();
     drop(old);
     *playback_state = Some(new_player(&app, &state, session));
-    Ok(true)
+    // A local file playing right now isn't affected, so it shouldn't restart.
+    Ok(!state.local_active.load(Ordering::SeqCst))
+}
+
+#[tauri::command]
+pub async fn pick_folder(window: WebviewWindow) -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("Choose a music folder")
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+    let folder = rx.await.ok().flatten()?;
+    folder.into_path().ok().map(|path| path.to_string_lossy().into_owned())
+}
+
+async fn local_index(state: &AppState, rescan: bool) -> Result<MappedMutexGuard<'_, LocalIndex>, String> {
+    let mut index = state.local_files.lock().await;
+    let folders = state.settings().local_folders;
+    if rescan || !index.as_ref().is_some_and(|index| index.is_scan_of(&folders)) {
+        let scanned = tokio::task::spawn_blocking(move || local_files::scan(folders))
+            .await
+            .map_err(|e| format!("Couldn't scan your local files: {e}"))?;
+        *index = Some(scanned);
+    }
+    Ok(MutexGuard::map(index, |index| index.get_or_insert_with(LocalIndex::default)))
+}
+
+#[tauri::command]
+pub async fn get_local_files(state: State<'_, AppState>) -> Result<LocalLibrary, String> {
+    Ok(local_index(&state, false).await?.library.clone())
+}
+
+#[tauri::command]
+pub async fn rescan_local_files(state: State<'_, AppState>) -> Result<LocalLibrary, String> {
+    Ok(local_index(&state, true).await?.library.clone())
+}
+
+fn local_player(state: &AppState) -> Result<&LocalPlayer, String> {
+    state
+        .local_player
+        .get()
+        .ok_or_else(|| "Local playback isn't ready yet".to_string())
+}
+
+fn is_local_uri(uri: &str) -> bool {
+    uri.starts_with(local_files::URI_PREFIX)
+}
+
+/// Hands playback to the local player or back to librespot, stopping the other.
+async fn set_local_active(state: &AppState, local: bool) {
+    if state.local_active.swap(local, Ordering::SeqCst) == local {
+        return;
+    }
+    if local {
+        if let Some(handle) = state.playback.lock().await.as_ref() {
+            handle.player.stop();
+        }
+    } else if let Some(player) = state.local_player.get() {
+        player.stop();
+    }
+}
+
+async fn play_local(state: &AppState, uri: &str, position_ms: u32) -> Result<(), String> {
+    let track = local_index(state, false).await?.find(uri);
+    set_local_active(state, true).await;
+    let player = local_player(state)?;
+    match track {
+        Some(track) => player.load(track, position_ms),
+        None => player.missing(),
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -279,7 +361,11 @@ pub async fn play_track(
     uri: String,
     position_ms: Option<u32>,
 ) -> Result<(), String> {
+    if is_local_uri(&uri) {
+        return play_local(&state, &uri, position_ms.unwrap_or(0)).await;
+    }
     ensure_playback(&app, &state, false).await?;
+    set_local_active(&state, false).await;
     let playback_state = state.playback.lock().await;
     let handle = require_playback(&playback_state)?;
     playback::player::play_uri(&handle.player, &uri, position_ms.unwrap_or(0))
@@ -302,6 +388,10 @@ pub async fn get_autoplay_tracks(
 
 #[tauri::command]
 pub async fn preload_track(state: State<'_, AppState>, uri: String) -> Result<(), String> {
+    // librespot reports a failed preload as the current song being unavailable.
+    if is_local_uri(&uri) {
+        return Ok(());
+    }
     let playback_state = state.playback.lock().await;
     let handle = require_playback(&playback_state)?;
     playback::player::preload_uri(&handle.player, &uri)
@@ -321,11 +411,51 @@ pub async fn get_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, 
 
 #[tauri::command]
 pub async fn get_playlist_tracks(
+    app: AppHandle,
     state: State<'_, AppState>,
     playlist_id: String,
 ) -> Result<Vec<Track>, String> {
-    let mut client = state.spotify.lock().await;
-    playlists::get_playlist_tracks(&mut client, &playlist_id).await
+    let mut tracks = load_playlist_tracks(&app, &state, &playlist_id).await?;
+    add_local_covers(&state, &mut tracks).await;
+    Ok(tracks)
+}
+
+async fn load_playlist_tracks(app: &AppHandle, state: &AppState, playlist_id: &str) -> Result<Vec<Track>, String> {
+    let result = {
+        let mut client = state.spotify.lock().await;
+        playlists::get_playlist_tracks(&mut client, playlist_id).await
+    };
+    if result.as_ref().is_ok_and(|tracks| !tracks.is_empty()) {
+        return result;
+    }
+    // The Web API only shows playlists you own or collaborate on.
+    if let Some(session) = spotify_session(app, state).await {
+        match playlists::get_playlist_tracks_via_session(&session, playlist_id).await {
+            Ok(tracks) if !tracks.is_empty() || result.is_err() => return Ok(tracks),
+            Ok(_) => {}
+            Err(e) => eprintln!("Couldn't read playlist {playlist_id} through the session: {e}"),
+        }
+    }
+    result
+}
+
+/// Playlists only keep a local file's tags, so its cover comes from the file
+/// itself when it's in Local Files.
+async fn add_local_covers(state: &AppState, tracks: &mut [Track]) {
+    if !tracks.iter().any(|track| is_local_uri(&track.uri) && track.album.images.is_empty()) {
+        return;
+    }
+    let Ok(index) = local_index(state, false).await else {
+        return;
+    };
+    for track in tracks
+        .iter_mut()
+        .filter(|track| is_local_uri(&track.uri) && track.album.images.is_empty())
+    {
+        if let Some(url) = index.find(&track.uri).and_then(|local| local.cover_url) {
+            track.album.images = vec![Image { url, width: None, height: None }];
+        }
+    }
 }
 
 #[tauri::command]
@@ -408,25 +538,60 @@ pub async fn search_tracks_page(
 }
 
 #[tauri::command]
-pub async fn get_artist_albums(state: State<'_, AppState>, artist_id: String) -> Result<Vec<Album>, String> {
+pub async fn get_artist_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    artist_id: String,
+) -> Result<ArtistPage, String> {
+    if let Some(session) = spotify_session(&app, &state).await {
+        match artist::page(&session, &artist_id).await {
+            Ok(page) => return Ok(page),
+            Err(e) => eprintln!("Falling back to the Web API for artist {artist_id}: {e}"),
+        }
+    }
     let mut client = state.spotify.lock().await;
-    artist::get_albums(&mut client, &artist_id).await
+    artist::basic_page(&mut client, &artist_id).await
 }
 
 #[tauri::command]
-pub async fn get_artist_popular_tracks(
+pub async fn get_artist_discography(
+    app: AppHandle,
     state: State<'_, AppState>,
     artist_id: String,
-    artist_name: String,
-) -> Result<Vec<Track>, String> {
+    group: String,
+) -> Result<Vec<Album>, String> {
+    if let Some(session) = spotify_session(&app, &state).await {
+        match artist::discography(&session, &artist_id, &group).await {
+            Ok(releases) => return Ok(releases),
+            Err(e) => eprintln!("Falling back to the Web API for artist {artist_id}'s releases: {e}"),
+        }
+    }
     let mut client = state.spotify.lock().await;
-    artist::popular_tracks(&mut client, &artist_id, &artist_name).await
+    artist::basic_discography(&mut client, &artist_id, &group).await
 }
 
 #[tauri::command]
 pub async fn get_album(state: State<'_, AppState>, album_id: String) -> Result<AlbumDetails, String> {
     let mut client = state.spotify.lock().await;
     album::get_album(&mut client, &album_id).await
+}
+
+#[tauri::command]
+pub async fn get_saved_albums(state: State<'_, AppState>) -> Result<Vec<Album>, String> {
+    let mut client = state.spotify.lock().await;
+    album::get_saved_albums(&mut client).await
+}
+
+#[tauri::command]
+pub async fn save_album(state: State<'_, AppState>, album_id: String) -> Result<(), String> {
+    let mut client = state.spotify.lock().await;
+    album::save(&mut client, &album_id).await
+}
+
+#[tauri::command]
+pub async fn remove_album(state: State<'_, AppState>, album_id: String) -> Result<(), String> {
+    let mut client = state.spotify.lock().await;
+    album::remove(&mut client, &album_id).await
 }
 
 #[tauri::command]
@@ -492,22 +657,42 @@ pub fn preview_equalizer(enabled: bool, gains: Vec<f32>) {
     playback::equalizer::configure(enabled, &gains);
 }
 
+const LOCAL_FILES_NEED_PLAYBACK: &str = "Connect playback to put local files in playlists";
+
 #[tauri::command]
 pub async fn add_to_playlist(
+    app: AppHandle,
     state: State<'_, AppState>,
     playlist_id: String,
     uris: Vec<String>,
 ) -> Result<(), String> {
-    let mut client = state.spotify.lock().await;
-    playlists::add_tracks(&mut client, &playlist_id, &uris).await
+    let (local, songs): (Vec<String>, Vec<String>) = uris.into_iter().partition(|uri| is_local_uri(uri));
+    if !songs.is_empty() {
+        let mut client = state.spotify.lock().await;
+        playlists::add_tracks(&mut client, &playlist_id, &songs).await?;
+    }
+    if !local.is_empty() {
+        let session = spotify_session(&app, &state)
+            .await
+            .ok_or_else(|| LOCAL_FILES_NEED_PLAYBACK.to_string())?;
+        playlists::add_local_tracks(&session, &playlist_id, &local).await?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn remove_from_playlist(
+    app: AppHandle,
     state: State<'_, AppState>,
     playlist_id: String,
     uri: String,
 ) -> Result<(), String> {
+    if is_local_uri(&uri) {
+        let session = spotify_session(&app, &state)
+            .await
+            .ok_or_else(|| LOCAL_FILES_NEED_PLAYBACK.to_string())?;
+        return playlists::remove_local_track(&session, &playlist_id, &uri).await;
+    }
     let mut client = state.spotify.lock().await;
     playlists::remove_track(&mut client, &playlist_id, &uri).await
 }
@@ -542,8 +727,20 @@ fn require_playback(
         .ok_or_else(|| "Playback isn't connected yet, click \"Connect playback\" first".to_string())
 }
 
+/// The librespot session, for Spotify's internal APIs, if playback is or can
+/// silently be connected.
+async fn spotify_session(app: &AppHandle, state: &AppState) -> Option<Session> {
+    ensure_playback(app, state, false).await.ok()?;
+    let playback_state = state.playback.lock().await;
+    playback_state.as_ref().map(|handle| handle.session.clone())
+}
+
 #[tauri::command]
 pub async fn pause(state: State<'_, AppState>) -> Result<(), String> {
+    if state.local_active.load(Ordering::SeqCst) {
+        local_player(&state)?.pause();
+        return Ok(());
+    }
     let playback_state = state.playback.lock().await;
     require_playback(&playback_state)?.player.pause();
     Ok(())
@@ -551,6 +748,10 @@ pub async fn pause(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn resume(state: State<'_, AppState>) -> Result<(), String> {
+    if state.local_active.load(Ordering::SeqCst) {
+        local_player(&state)?.play();
+        return Ok(());
+    }
     let playback_state = state.playback.lock().await;
     require_playback(&playback_state)?.player.play();
     Ok(())
@@ -558,6 +759,10 @@ pub async fn resume(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn seek(state: State<'_, AppState>, position_ms: u32) -> Result<(), String> {
+    if state.local_active.load(Ordering::SeqCst) {
+        local_player(&state)?.seek(position_ms);
+        return Ok(());
+    }
     let playback_state = state.playback.lock().await;
     require_playback(&playback_state)?.player.seek(position_ms);
     Ok(())

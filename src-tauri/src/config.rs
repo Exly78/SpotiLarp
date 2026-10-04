@@ -31,6 +31,8 @@ pub struct Settings {
     pub eq_gains: Vec<f32>,
     pub eq_preset: String,
     pub output_device: Option<String>,
+    pub local_folders: Vec<String>,
+    pub discord_local_covers: bool,
 }
 
 impl Default for Settings {
@@ -45,6 +47,8 @@ impl Default for Settings {
             eq_gains: vec![0.0; 10],
             eq_preset: "flat".to_string(),
             output_device: None,
+            local_folders: Vec::new(),
+            discord_local_covers: true,
         }
     }
 }

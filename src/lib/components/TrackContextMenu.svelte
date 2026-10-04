@@ -8,6 +8,7 @@
   import { library, ownedPlaylists, createPlaylist, adjustTrackCount } from "../library.svelte.js";
   import { openArtist, openAlbum } from "../nav.svelte.js";
   import { notify } from "../toast.svelte.js";
+  import { LOCAL_URI_PREFIX } from "../constants.js";
   import Icon from "./Icon.svelte";
 
   const EDGE_MARGIN = 8;
@@ -106,6 +107,7 @@
 {#if menu.open && menu.track}
   {@const track = menu.track}
   {@const link = track.id ? `https://open.spotify.com/track/${track.id}` : ""}
+  {@const local = track.uri.startsWith(LOCAL_URI_PREFIX)}
   {@const artist = track.artists.find((a) => a.id)}
   <div
     class="menu"
@@ -143,7 +145,7 @@
     {:else}
       <button type="button" role="menuitem" onclick={() => run(() => playNext(track))}>Play next</button>
       <button type="button" role="menuitem" onclick={() => run(() => addToQueue(track))}>Add to queue</button>
-      {#if link}
+      {#if link || local}
         <div class="divider"></div>
         <button type="button" role="menuitem" class="has-sub" onclick={() => (page = "playlists")}>
           Add to playlist <Icon name="chevron-right" size={14} />
@@ -152,9 +154,11 @@
           {@const remove = menu.onRemove}
           <button type="button" role="menuitem" onclick={() => run(remove)}>Remove from this playlist</button>
         {/if}
-        <button type="button" role="menuitem" onclick={() => run(() => toggleLike(track.id))}>
-          {likedIds.has(track.id) ? "Remove from Liked Songs" : "Save to Liked Songs"}
-        </button>
+        {#if link}
+          <button type="button" role="menuitem" onclick={() => run(() => toggleLike(track.id))}>
+            {likedIds.has(track.id) ? "Remove from Liked Songs" : "Save to Liked Songs"}
+          </button>
+        {/if}
       {/if}
       {#if artist || track.album.id}
         <div class="divider"></div>

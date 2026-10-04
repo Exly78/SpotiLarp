@@ -3,25 +3,29 @@
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import * as api from "../api.js";
-  import { smallestCover } from "../utils.js";
+  import { smallestCover, releaseType } from "../utils.js";
   import {
     library,
     loadLibrary,
     createPlaylist,
     renamePlaylist,
     deletePlaylist,
+    removeAlbum,
     isOwned,
     adjustTrackCount,
   } from "../library.svelte.js";
   import { likeTracks } from "../likes.svelte.js";
   import { drag } from "../drag.svelte.js";
-  import { nav, navigate } from "../nav.svelte.js";
+  import { nav, navigate, openAlbum } from "../nav.svelte.js";
   import { notify } from "../toast.svelte.js";
   import Icon from "./Icon.svelte";
 
-  import { LIKED_SONGS_ID } from "../constants.js";
+  import { LIKED_SONGS_ID, LOCAL_URI_PREFIX } from "../constants.js";
 
-  /** @typedef {import("../types.js").Playlist} Playlist */
+  /**
+   * @typedef {import("../types.js").Playlist} Playlist
+   * @typedef {import("../types.js").Album} Album
+   */
 
   /** @type {{ loggedIn: boolean }} */
   let { loggedIn } = $props();
@@ -35,6 +39,16 @@
   };
 
   const selectedId = $derived(nav.view.type === "playlist" ? nav.view.playlist.id : null);
+  const selectedAlbumId = $derived(nav.view.type === "album" ? nav.view.id : null);
+
+  let filter = $state(/** @type {"all"|"playlists"|"albums"} */ ("all"));
+  const showPlaylists = $derived(filter !== "albums");
+  const showAlbums = $derived(filter !== "playlists");
+
+  /** @param {"playlists"|"albums"} kind */
+  function toggleFilter(kind) {
+    filter = filter === kind ? "all" : kind;
+  }
 
   let creating = $state(false);
   let newName = $state("");
@@ -45,7 +59,7 @@
   /** @type {string|null} */
   let dropTargetId = $state(null);
 
-  /** @type {{ playlist: Playlist, x: number, y: number, confirmDelete: boolean }|null} */
+  /** @type {{ playlist: Playlist|null, album: Album|null, x: number, y: number, confirmDelete: boolean }|null} */
   let menu = $state(null);
   /** @type {HTMLDivElement|undefined} */
   let menuEl = $state();
@@ -109,12 +123,14 @@
   async function onDrop(evt, playlist) {
     evt.preventDefault();
     dropTargetId = null;
-    const tracks = drag.tracks.filter((t) => t.id);
-    if (tracks.length === 0) return;
     if (playlist.isLikedSongs) {
-      await likeTracks(tracks.map((t) => t.id));
+      const songs = drag.tracks.filter((t) => t.id);
+      if (songs.length > 0) await likeTracks(songs.map((t) => t.id));
       return;
     }
+    // Local files go in playlists too (Spotify can't like them).
+    const tracks = drag.tracks.filter((t) => t.id || t.uri.startsWith(LOCAL_URI_PREFIX));
+    if (tracks.length === 0) return;
     try {
       await api.addToPlaylist(playlist.id, tracks.map((t) => t.uri));
       adjustTrackCount(playlist.id, tracks.length);
@@ -130,7 +146,34 @@
    */
   function openMenu(evt, playlist) {
     evt.preventDefault();
-    menu = { playlist, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+    menu = { playlist, album: null, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+  }
+
+  /**
+   * @param {MouseEvent} evt
+   * @param {Album} album
+   */
+  function openAlbumMenu(evt, album) {
+    evt.preventDefault();
+    menu = { playlist: null, album, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+  }
+
+  /** @param {Album} album */
+  async function removeSavedAlbum(album) {
+    menu = null;
+    if (!album.id) return;
+    try {
+      await removeAlbum(album.id);
+      notify(`Removed ${album.name} from Your Library`);
+    } catch (e) {
+      notify(`Couldn't remove the album: ${e}`);
+    }
+  }
+
+  /** @param {Album} album */
+  function albumSubtitle(album) {
+    const artists = (album.artists ?? []).map((a) => a.name).join(", ");
+    return artists ? `${releaseType(album.album_type)} · ${artists}` : releaseType(album.album_type);
   }
 
   /** @param {PointerEvent} evt */
@@ -181,7 +224,7 @@
     try {
       await deletePlaylist(playlist.id);
       if (selectedId === playlist.id) navigate({ type: "home" });
-      notify(isOwned(playlist) ? `Deleted ${playlist.name}` : `Removed ${playlist.name} from your library`);
+      notify(isOwned(playlist) ? `Deleted ${playlist.name}` : `Removed ${playlist.name} from Your Library`);
     } catch (e) {
       notify(`Couldn't remove the playlist: ${e}`);
     }
@@ -196,7 +239,7 @@
 
 <nav class="sidebar">
   <div class="header-row">
-    <h2>Playlists</h2>
+    <h2>Your Library</h2>
     <div class="header-buttons">
       <button
         type="button"
@@ -213,8 +256,8 @@
         class="refresh"
         onclick={loadLibrary}
         disabled={library.loading || !loggedIn}
-        aria-label="Refresh playlists"
-        title="Refresh playlists"
+        aria-label="Refresh library"
+        title="Refresh library"
       >
         <Icon name="refresh" size={16} class={library.loading ? "spin" : ""} />
       </button>
@@ -272,6 +315,21 @@
           </div>
         </button>
       </li>
+      <li>
+        <button
+          type="button"
+          class="playlist-button"
+          class:active={nav.view.type === "local"}
+          onclick={() => navigate({ type: "local" })}
+        >
+          <div class="thumb local-thumb">
+            <Icon name="folder" size={20} />
+          </div>
+          <div class="meta">
+            <div class="name">Local Files</div>
+          </div>
+        </button>
+      </li>
     </ul>
     {#if library.loading && library.playlists.length === 0}
       <ul class="playlist-list" transition:fade={{ duration: 150 }}>
@@ -287,11 +345,22 @@
       </ul>
     {:else if library.error}
       <p class="status error" transition:fade={{ duration: 150 }}>{library.error}</p>
-    {:else if library.playlists.length === 0}
-      <p class="status" transition:fade={{ duration: 150 }}>No playlists yet.</p>
     {:else}
+      {#if library.albums.length > 0}
+        <div class="filters" role="group" aria-label="Show">
+          <button type="button" class="chip" class:selected={filter === "playlists"} onclick={() => toggleFilter("playlists")}>
+            Playlists
+          </button>
+          <button type="button" class="chip" class:selected={filter === "albums"} onclick={() => toggleFilter("albums")}>
+            Albums
+          </button>
+        </div>
+      {/if}
+      {#if showPlaylists && library.playlists.length === 0}
+        <p class="status" transition:fade={{ duration: 150 }}>No playlists yet.</p>
+      {/if}
       <ul class="playlist-list">
-        {#each library.playlists as playlist, i (playlist.id)}
+        {#each showPlaylists ? library.playlists : [] as playlist, i (playlist.id)}
           <li in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}>
             {#if renamingId === playlist.id}
               <div class="rename-row">
@@ -334,25 +403,51 @@
             {/if}
           </li>
         {/each}
+        {#each showAlbums ? library.albums : [] as album, i (album.id)}
+          <li in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}>
+            <button
+              type="button"
+              class="playlist-button"
+              class:active={selectedAlbumId === album.id}
+              onclick={() => openAlbum(album)}
+              oncontextmenu={(e) => openAlbumMenu(e, album)}
+            >
+              {#if smallestCover(album.images)}
+                <img src={smallestCover(album.images)} alt="" class="thumb" />
+              {:else}
+                <div class="thumb placeholder"></div>
+              {/if}
+              <div class="meta">
+                <div class="name">{album.name}</div>
+                <div class="count">{albumSubtitle(album)}</div>
+              </div>
+            </button>
+          </li>
+        {/each}
       </ul>
     {/if}
   {/if}
 </nav>
 
 {#if menu}
-  {@const playlist = menu.playlist}
-  {@const owned = isOwned(playlist)}
   <div class="menu" role="menu" bind:this={menuEl} style="left: {menu.x}px; top: {menu.y}px">
-    {#if owned}
-      <button type="button" role="menuitem" onclick={() => startRename(playlist)}>Rename</button>
-    {/if}
-    <button type="button" role="menuitem" class:danger={menu.confirmDelete} onclick={() => confirmDelete(playlist)}>
-      {#if menu.confirmDelete}
-        Click again to confirm
-      {:else}
-        {owned ? "Delete playlist" : "Remove from your library"}
+    {#if menu.album}
+      {@const album = menu.album}
+      <button type="button" role="menuitem" onclick={() => removeSavedAlbum(album)}>Remove from Your Library</button>
+    {:else if menu.playlist}
+      {@const playlist = menu.playlist}
+      {@const owned = isOwned(playlist)}
+      {#if owned}
+        <button type="button" role="menuitem" onclick={() => startRename(playlist)}>Rename</button>
       {/if}
-    </button>
+      <button type="button" role="menuitem" class:danger={menu.confirmDelete} onclick={() => confirmDelete(playlist)}>
+        {#if menu.confirmDelete}
+          Click again to confirm
+        {:else}
+          {owned ? "Delete playlist" : "Remove from Your Library"}
+        {/if}
+      </button>
+    {/if}
   </div>
 {/if}
 
@@ -370,6 +465,29 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 0.4em;
+}
+.filters {
+  display: flex;
+  gap: 0.5em;
+  padding: 0 0.4em;
+}
+.chip {
+  padding: 0.4em 0.9em;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--control-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background-color var(--transition);
+}
+.chip:hover {
+  background: #333;
+}
+.chip.selected {
+  background: var(--text);
+  color: #000;
 }
 h2 {
   font-size: var(--fs-xs);
@@ -541,6 +659,13 @@ h2 {
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #1e3264, #1ed760);
+  color: #fff;
+}
+.local-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0b4d33, #1ed760);
   color: #fff;
 }
 .rename-row {

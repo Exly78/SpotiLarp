@@ -4,10 +4,12 @@
   import HomeView from "./views/HomeView.svelte";
   import PlaylistView from "./views/PlaylistView.svelte";
   import ArtistView from "./views/ArtistView.svelte";
+  import DiscographyView from "./views/DiscographyView.svelte";
   import AlbumView from "./views/AlbumView.svelte";
   import SearchView from "./views/SearchView.svelte";
   import SettingsView from "./views/SettingsView.svelte";
   import StatsView from "./views/StatsView.svelte";
+  import LocalFilesView from "./views/LocalFilesView.svelte";
 
   /** @type {{ loggedIn: boolean, loggingIn?: boolean, onRelogin: () => void }} */
   let { loggedIn, loggingIn = false, onRelogin } = $props();
@@ -15,6 +17,8 @@
   /** @type {HTMLDivElement|undefined} */
   let scroller = $state();
   const key = $derived(viewKey(nav.view));
+  // The artist page's banner runs to the panel's edges, like Spotify's.
+  const fullBleed = $derived(!nav.lyrics && nav.view.type === "artist");
 
   $effect(() => {
     key;
@@ -23,7 +27,7 @@
 </script>
 
 <div class="main-content">
-  <div class="results-area" bind:this={scroller}>
+  <div class="results-area" class:full-bleed={fullBleed} bind:this={scroller}>
     <div class="lyrics-wrap" class:hidden={!nav.lyrics}>
       <Lyrics visible={nav.lyrics} />
     </div>
@@ -33,6 +37,8 @@
           <PlaylistView playlist={nav.view.playlist} />
         {:else if nav.view.type === "artist"}
           <ArtistView id={nav.view.id} name={nav.view.name} />
+        {:else if nav.view.type === "discography"}
+          <DiscographyView id={nav.view.id} name={nav.view.name} group={nav.view.group} />
         {:else if nav.view.type === "album"}
           <AlbumView id={nav.view.id} name={nav.view.name} />
         {:else if nav.view.type === "search"}
@@ -41,6 +47,8 @@
           <SettingsView />
         {:else if nav.view.type === "stats"}
           <StatsView />
+        {:else if nav.view.type === "local"}
+          <LocalFilesView />
         {:else}
           <HomeView {loggedIn} {loggingIn} {onRelogin} />
         {/if}
@@ -69,5 +77,10 @@
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 0.25em;
+}
+/* Cancels .content-area's padding (+page.svelte); the view pads itself. */
+.results-area.full-bleed {
+  margin: -1.5em -2em;
+  padding-right: 0;
 }
 </style>

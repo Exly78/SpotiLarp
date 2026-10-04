@@ -1,11 +1,11 @@
 {
-  "version": "1.0.0",
-  "notes": "First stable release: autoplay keeps the music going when a playlist ends, a new borderless window with a draggable top bar, and fixes for playback login hangs, reconnecting, logging out, drag-to-reorder and expired logins.",
-  "pub_date": "2026-10-03T10:25:50Z",
+  "version": "1.0.1",
+  "notes": "Artist pages now look like Spotify's: a banner, monthly listeners, popular songs with play counts, the full discography, Fans also like, Appears On and an About section. Saved albums show up in Your Library, and the new + button on album pages saves them. Local Files plays music from your computer, and local files can now be added to your playlists. Spotify's own playlists and other people's playlists open now too.",
+  "pub_date": "2026-10-04T17:44:42Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNjVDYWJxeTVlSUhTM1F5czBERUJobCsxZHpsRDUvYnlua013TTczUFZQTUtkdGExdzFDckQwRHNvN3ZWdVRycVhrMjBZanJHSlVwNEFiUEVJemIzemw1MTNObGl1YVE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMDIzMTIyCWZpbGU6U3BvdGlMYXJwXzEuMC4wX3g2NC1zZXR1cC5leGUKVkx2VmdBaGtmUTJrV1ZOYzVDSTdFSnN6WFpPSWRWWTY2aWRxdy9KOEJmUFNhLzNZRmVBUUVSTUUyMThiMm5pUDkrTlpPRVUrRUY1NW56clNldGNiQnc9PQo=",
-      "url": "https://github.com/Exly78/SpotiLarp/releases/download/v1.0.0/SpotiLarp_1.0.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNjVDYWJxeTVlSUJlUGJibllwOWRNM2Q3NmpuK2dSNjVIMWttQkhuaHZZSTBib1NGS3QwVGEveGU3b1pKK3k4N2VZUlZoam9PSEtldGxyeHcwVFkxenk4dTZHc2FqUVEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMTM1ODcyCWZpbGU6U3BvdGlMYXJwXzEuMC4xX3g2NC1zZXR1cC5leGUKTUdUeFYydlRNV2dBeWpWUFhTL3V5T0J5ejR5MUMwL2RDaFFCek1pOCsyWmtnTGJHK3BsSnllOGpvOVlXOTVpdzFCc0VQSnVrcUQxMlBtQnpJRTRkRHc9PQo=",
+      "url": "https://github.com/Exly78/SpotiLarp/releases/download/v1.0.1/SpotiLarp_1.0.1_x64-setup.exe"
     }
   }
 }

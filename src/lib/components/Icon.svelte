@@ -138,6 +138,10 @@
     <line x1="20" y1="4" x2="13" y2="11" />
     <line x1="4" y1="20" x2="11" y2="13" />
   </svg>
+{:else if name === "folder"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
+  </svg>
 {:else if name === "plus"}
   <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
     <line x1="12" y1="5" x2="12" y2="19" />
@@ -177,5 +181,30 @@
     <path d="M20 17H7a3 3 0 0 1-3-3v-2" />
     <polyline points="10,13 7,17 10,21" />
     <text x="12" y="14.5" font-size="7" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">1</text>
+  </svg>
+{:else if name === "verified"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24">
+    <path
+      d="M12 1.5l2.6 1.9 3.2-.1 1 3.1 2.6 1.9-1 3.1 1 3.1-2.6 1.9-1 3.1-3.2-.1L12 22.5l-2.6-1.9-3.2.1-1-3.1-2.6-1.9 1-3.1-1-3.1 2.6-1.9 1-3.1 3.2.1z"
+      fill="#4cb3ff"
+    />
+    <polyline points="7.6,12.2 10.6,15.1 16.4,9.2" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+{:else if name === "add-circle"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+    <circle cx="12" cy="12" r="9.5" />
+    <line x1="12" y1="7.5" x2="12" y2="16.5" />
+    <line x1="7.5" y1="12" x2="16.5" y2="12" />
+  </svg>
+{:else if name === "added"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10.3" fill="currentColor" />
+    <polyline points="7.5,12.3 10.6,15.3 16.5,9.2" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+{:else if name === "more"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+    <circle cx="5" cy="12" r="2" />
+    <circle cx="12" cy="12" r="2" />
+    <circle cx="19" cy="12" r="2" />
   </svg>
 {/if}

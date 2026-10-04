@@ -2,9 +2,11 @@
  * @typedef {{ type: "home" }
  *   | { type: "playlist", playlist: import("./types.js").Playlist }
  *   | { type: "artist", id: string, name: string }
+ *   | { type: "discography", id: string, name: string, group: import("./types.js").ReleaseGroup }
  *   | { type: "album", id: string, name?: string }
  *   | { type: "search", query: string }
  *   | { type: "stats" }
+ *   | { type: "local" }
  *   | { type: "settings" }} View
  */
 
@@ -20,6 +22,7 @@ export function viewKey(view) {
       return `playlist:${view.playlist.id}`;
     case "artist":
     case "album":
+    case "discography":
       return `${view.type}:${view.id}`;
     case "search":
       return `search:${view.query}`;
@@ -69,4 +72,26 @@ export function openArtist(artist) {
 /** @param {{ id?: string, name?: string }} album */
 export function openAlbum(album) {
   if (album.id) navigate({ type: "album", id: album.id, name: album.name });
+}
+
+/**
+ * @param {{ id: string, name: string }} artist
+ * @param {import("./types.js").ReleaseGroup} [group]
+ */
+export function openDiscography(artist, group = "all") {
+  navigate({ type: "discography", id: artist.id, name: artist.name, group });
+}
+
+/** @param {import("./types.js").PlaylistCard} card */
+export function openPlaylistCard(card) {
+  navigate({
+    type: "playlist",
+    playlist: {
+      id: card.id,
+      name: card.name,
+      images: card.images,
+      track_count: { total: 0 },
+      owner: card.owner ? { id: "", display_name: card.owner } : null,
+    },
+  });
 }

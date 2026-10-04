@@ -1,6 +1,7 @@
 pub mod autoplay;
 pub mod equalizer;
 pub mod events;
+pub mod local;
 pub mod player;
 pub mod session;
 pub mod sink;

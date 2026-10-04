@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod discord;
 mod http;
+mod local_files;
 mod lyrics;
 mod media;
 mod playback;
@@ -41,6 +42,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_ARG]),
@@ -54,6 +56,13 @@ pub fn run() {
             settings: std::sync::Mutex::new(settings),
             mini_restore: std::sync::Mutex::new(None),
             discord: tokio::sync::Mutex::new(discord_sender),
+            local_files: tokio::sync::Mutex::new(None),
+            local_player: std::sync::OnceLock::new(),
+            local_active: std::sync::atomic::AtomicBool::new(false),
+            playback_events: std::sync::OnceLock::new(),
+        })
+        .register_uri_scheme_protocol(local_files::COVER_SCHEME, |_ctx, request| {
+            local_files::serve_cover(&request)
         })
         .setup(|app| {
             #[cfg(target_os = "windows")]
@@ -67,6 +76,10 @@ pub fn run() {
                 let sender = media::spawn(app.handle().clone(), hwnd);
                 let _ = app.state::<AppState>().media.set(sender);
             }
+
+            let state = app.state::<AppState>();
+            let _ = state.playback_events.set(playback::events::spawn_hub(app.handle().clone()));
+            let _ = state.local_player.set(playback::local::LocalPlayer::spawn(app.handle().clone()));
 
             let tray_created = tray::create(app).is_ok();
 
@@ -111,9 +124,12 @@ pub fn run() {
             commands::search,
             commands::search_all,
             commands::search_tracks_page,
-            commands::get_artist_albums,
-            commands::get_artist_popular_tracks,
+            commands::get_artist_page,
+            commands::get_artist_discography,
             commands::get_album,
+            commands::get_saved_albums,
+            commands::save_album,
+            commands::remove_album,
             commands::get_recently_played,
             commands::get_top_tracks,
             commands::get_top_artists,
@@ -152,7 +168,10 @@ pub fn run() {
             commands::remove_playlist,
             commands::move_playlist_track,
             commands::list_output_devices,
-            commands::preview_equalizer
+            commands::preview_equalizer,
+            commands::pick_folder,
+            commands::get_local_files,
+            commands::rescan_local_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

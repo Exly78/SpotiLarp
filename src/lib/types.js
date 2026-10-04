@@ -57,6 +57,68 @@
  * @property {Followers|null} [followers]
  */
 
+/** @typedef {Track & { playcount: number|null, explicit: boolean }} PopularTrack */
+
+/** @typedef {"all"|"album"|"single"|"compilation"} ReleaseGroup */
+
+/**
+ * @typedef {Object} PlaylistCard
+ * @property {string} id
+ * @property {string} name
+ * @property {string} description
+ * @property {Image[]} images
+ * @property {string|null} owner
+ */
+
+/**
+ * @typedef {Object} TopCity
+ * @property {string} city
+ * @property {string} country
+ * @property {number} listeners
+ */
+
+/**
+ * @typedef {Object} ExternalLink
+ * @property {string} name
+ * @property {string} url
+ */
+
+/**
+ * Everything on an artist's page. Without a playback session only the
+ * basics (name, images, genres, followers, releases, an approximate "Popular")
+ * are filled in.
+ * @typedef {Object} ArtistPage
+ * @property {string} id
+ * @property {string} name
+ * @property {Image[]} images
+ * @property {Image[]} header_images
+ * @property {string|null} color
+ * @property {boolean} verified
+ * @property {number|null} monthly_listeners
+ * @property {number|null} followers
+ * @property {number|null} world_rank
+ * @property {string[]} genres
+ * @property {string|null} biography
+ * @property {Image[][]} gallery
+ * @property {TopCity[]} top_cities
+ * @property {ExternalLink[]} external_links
+ * @property {boolean|null} following
+ * @property {PopularTrack[]} top_tracks
+ * @property {Album|null} latest_release
+ * @property {Album[]} popular_releases
+ * @property {Album[]} albums
+ * @property {Album[]} singles
+ * @property {Album[]} compilations
+ * @property {number} album_count
+ * @property {number} single_count
+ * @property {number} compilation_count
+ * @property {ArtistDetails[]} related_artists
+ * @property {Album[]} appears_on
+ * @property {PlaylistCard[]} featuring
+ * @property {PlaylistCard[]} discovered_on
+ * @property {PlaylistCard[]} playlists
+ */
+
 /**
  * @typedef {Object} PlaylistTrackCount
  * @property {number} total
@@ -84,6 +146,15 @@
  * @property {number[]} eq_gains
  * @property {string} eq_preset
  * @property {string|null} output_device
+ * @property {string[]} local_folders
+ * @property {boolean} discord_local_covers
+ */
+
+/**
+ * @typedef {Object} LocalLibrary
+ * @property {string[]} folders
+ * @property {Track[]} tracks
+ * @property {number} skipped
  */
 
 /**
@@ -109,6 +180,7 @@
  * @property {string|null} [primary_artist_id]
  * @property {{ id: string|null, name: string }[]} [artist_list]
  * @property {string|null} [track_id]
+ * @property {string} [uri]
  * @property {string} [album]
  * @property {number} [duration_ms]
  * @property {string|null} [cover_url]

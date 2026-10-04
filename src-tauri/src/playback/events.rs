@@ -1,12 +1,25 @@
+use std::sync::atomic::Ordering;
+
 use librespot_metadata::audio::UniqueFields;
 use librespot_playback::player::{Player, PlayerEvent};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
+use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::discord::PresenceUpdate;
+use crate::local_files;
 use crate::media::MediaUpdate;
 use crate::state::AppState;
+
+/// Which player an event came from: librespot for Spotify, or the local file player.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Spotify,
+    Local,
+}
+
+pub type EventSender = UnboundedSender<(Source, PlaybackEvent)>;
 
 #[derive(Clone, Serialize)]
 pub struct ArtistRef {
@@ -34,6 +47,7 @@ pub enum PlaybackEvent {
         artist_list: Vec<ArtistRef>,
         
         track_id: Option<String>,
+        uri: String,
         album: String,
         duration_ms: u32,
         cover_url: Option<String>,
@@ -92,6 +106,7 @@ fn map_event(event: PlayerEvent) -> Option<PlaybackEvent> {
                 primary_artist_id,
                 artist_list,
                 track_id,
+                uri: audio_item.uri.clone(),
                 album,
                 duration_ms: audio_item.duration_ms,
                 cover_url,
@@ -135,118 +150,147 @@ fn update_media(app: &AppHandle, update: MediaUpdate) {
     }
 }
 
+pub fn publish(app: &AppHandle, source: Source, event: PlaybackEvent) {
+    if let Some(sender) = app.state::<AppState>().playback_events.get() {
+        let _ = sender.send((source, event));
+    }
+}
+
 pub fn spawn_forwarder(app: AppHandle, player: &Player) {
     let mut channel = player.get_player_event_channel();
     tauri::async_runtime::spawn(async move {
-        let mut current_track: Option<CurrentTrack> = None;
-        let mut is_playing = false;
         while let Some(event) = channel.recv().await {
             if let Some(mapped) = map_event(event) {
-                match &mapped {
-                    PlaybackEvent::TrackChanged {
-                        name,
-                        artists,
-                        album,
-                        duration_ms,
-                        cover_url,
-                        track_id,
-                        ..
-                    } => {
-                        announce_track(&app, name, artists);
-                        current_track = Some(CurrentTrack {
-                            name: name.clone(),
-                            artists: artists.clone(),
-                            album: album.clone(),
-                            cover_url: cover_url.clone(),
-                            duration_ms: *duration_ms,
-                            track_url: track_id
-                                .as_ref()
-                                .map(|id| format!("https://open.spotify.com/track/{id}")),
-                        });
-                    }
-                    PlaybackEvent::Playing { position_ms } | PlaybackEvent::Seeked { position_ms } => {
-                        if matches!(mapped, PlaybackEvent::Playing { .. }) {
-                            is_playing = true;
-                        }
-                        if let Some(t) = current_track.as_ref().filter(|_| is_playing) {
-                            update_discord_presence(
-                                &app,
-                                PresenceUpdate::Playing {
-                                    name: t.name.clone(),
-                                    artists: t.artists.clone(),
-                                    album: t.album.clone(),
-                                    cover_url: t.cover_url.clone(),
-                                    position_ms: *position_ms,
-                                    duration_ms: t.duration_ms,
-                                    track_url: t.track_url.clone(),
-                                },
-                            )
-                            .await;
-                        }
-                    }
-                    PlaybackEvent::Paused { .. } => {
-                        is_playing = false;
-                        if let Some(t) = &current_track {
-                            update_discord_presence(
-                                &app,
-                                PresenceUpdate::Paused {
-                                    name: t.name.clone(),
-                                    artists: t.artists.clone(),
-                                    album: t.album.clone(),
-                                    cover_url: t.cover_url.clone(),
-                                    track_url: t.track_url.clone(),
-                                },
-                            )
-                            .await;
-                        }
-                    }
-                    PlaybackEvent::Stopped | PlaybackEvent::EndOfTrack | PlaybackEvent::Unavailable => {
-                        is_playing = false;
-                        update_discord_presence(&app, PresenceUpdate::Cleared).await;
-                    }
-                    _ => {}
-                }
-
-                let media_update = match &mapped {
-                    PlaybackEvent::TrackChanged {
-                        name,
-                        artists,
-                        album,
-                        duration_ms,
-                        cover_url,
-                        ..
-                    } => Some(MediaUpdate::Metadata {
-                        title: name.clone(),
-                        artist: artists.clone(),
-                        album: album.clone(),
-                        cover_url: cover_url.clone(),
-                        duration_ms: *duration_ms,
-                    }),
-                    PlaybackEvent::Playing { position_ms } => Some(MediaUpdate::Playing {
-                        position_ms: *position_ms,
-                    }),
-                    PlaybackEvent::PositionChanged { position_ms } | PlaybackEvent::Seeked { position_ms } => {
-                        Some(if is_playing {
-                            MediaUpdate::Playing { position_ms: *position_ms }
-                        } else {
-                            MediaUpdate::Paused { position_ms: *position_ms }
-                        })
-                    }
-                    PlaybackEvent::Paused { position_ms } => Some(MediaUpdate::Paused {
-                        position_ms: *position_ms,
-                    }),
-                    PlaybackEvent::EndOfTrack => Some(MediaUpdate::Paused {
-                        position_ms: current_track.as_ref().map_or(0, |t| t.duration_ms),
-                    }),
-                    PlaybackEvent::Stopped | PlaybackEvent::Unavailable => Some(MediaUpdate::Stopped),
-                    _ => None,
-                };
-                if let Some(update) = media_update {
-                    update_media(&app, update);
-                }
-
-                let _ = app.emit("player-event", mapped);
+                publish(&app, Source::Spotify, mapped);
             }
         }
     });
+}
+
+pub fn spawn_hub(app: AppHandle) -> EventSender {
+    let (sender, mut events) = mpsc::unbounded_channel::<(Source, PlaybackEvent)>();
+    tauri::async_runtime::spawn(async move {
+        let mut current_track: Option<CurrentTrack> = None;
+        let mut is_playing = false;
+        while let Some((source, mapped)) = events.recv().await {
+            // Switching players stops the other one, and its late events (like a
+            // Stopped landing after the new song started) mustn't reach the UI.
+            let local_active = app.state::<AppState>().local_active.load(Ordering::SeqCst);
+            let active = if local_active { Source::Local } else { Source::Spotify };
+            if source != active && !matches!(mapped, PlaybackEvent::VolumeChanged { .. }) {
+                continue;
+            }
+            match &mapped {
+                PlaybackEvent::TrackChanged {
+                    name,
+                    artists,
+                    album,
+                    duration_ms,
+                    cover_url,
+                    track_id,
+                    ..
+                } => {
+                    announce_track(&app, name, artists);
+                    current_track = Some(CurrentTrack {
+                        name: name.clone(),
+                        artists: artists.clone(),
+                        album: album.clone(),
+                        // Local covers reach Discord by being uploaded, which can be turned off.
+                        cover_url: cover_url.clone().filter(|url| {
+                            url.starts_with("https://") || app.state::<AppState>().settings().discord_local_covers
+                        }),
+                        duration_ms: *duration_ms,
+                        track_url: track_id
+                            .as_ref()
+                            .map(|id| format!("https://open.spotify.com/track/{id}")),
+                    });
+                }
+                PlaybackEvent::Playing { position_ms } | PlaybackEvent::Seeked { position_ms } => {
+                    if matches!(mapped, PlaybackEvent::Playing { .. }) {
+                        is_playing = true;
+                    }
+                    if let Some(t) = current_track.as_ref().filter(|_| is_playing) {
+                        update_discord_presence(
+                            &app,
+                            PresenceUpdate::Playing {
+                                name: t.name.clone(),
+                                artists: t.artists.clone(),
+                                album: t.album.clone(),
+                                cover_url: t.cover_url.clone(),
+                                position_ms: *position_ms,
+                                duration_ms: t.duration_ms,
+                                track_url: t.track_url.clone(),
+                            },
+                        )
+                        .await;
+                    }
+                }
+                PlaybackEvent::Paused { .. } => {
+                    is_playing = false;
+                    if let Some(t) = &current_track {
+                        update_discord_presence(
+                            &app,
+                            PresenceUpdate::Paused {
+                                name: t.name.clone(),
+                                artists: t.artists.clone(),
+                                album: t.album.clone(),
+                                cover_url: t.cover_url.clone(),
+                                track_url: t.track_url.clone(),
+                            },
+                        )
+                        .await;
+                    }
+                }
+                PlaybackEvent::Stopped | PlaybackEvent::EndOfTrack | PlaybackEvent::Unavailable => {
+                    is_playing = false;
+                    update_discord_presence(&app, PresenceUpdate::Cleared).await;
+                }
+                _ => {}
+            }
+
+            let media_update = match &mapped {
+                PlaybackEvent::TrackChanged {
+                    name,
+                    artists,
+                    album,
+                    duration_ms,
+                    cover_url,
+                    ..
+                } => Some(MediaUpdate::Metadata {
+                    title: name.clone(),
+                    artist: artists.clone(),
+                    album: album.clone(),
+                    cover_url: cover_url.as_deref().map(|url| match local_files::cover_file(url) {
+                        Some(path) => format!("file://{}", path.display()),
+                        None => url.to_string(),
+                    }),
+                    duration_ms: *duration_ms,
+                }),
+                PlaybackEvent::Playing { position_ms } => Some(MediaUpdate::Playing {
+                    position_ms: *position_ms,
+                }),
+                PlaybackEvent::PositionChanged { position_ms } | PlaybackEvent::Seeked { position_ms } => {
+                    Some(if is_playing {
+                        MediaUpdate::Playing { position_ms: *position_ms }
+                    } else {
+                        MediaUpdate::Paused { position_ms: *position_ms }
+                    })
+                }
+                PlaybackEvent::Paused { position_ms } => Some(MediaUpdate::Paused {
+                    position_ms: *position_ms,
+                }),
+                PlaybackEvent::EndOfTrack => Some(MediaUpdate::Paused {
+                    position_ms: current_track.as_ref().map_or(0, |t| t.duration_ms),
+                }),
+                PlaybackEvent::Stopped | PlaybackEvent::Unavailable => Some(MediaUpdate::Stopped),
+                _ => None,
+            };
+            if let Some(update) = media_update {
+                update_media(&app, update);
+            }
+
+            let _ = app.emit("player-event", mapped);
+        }
+    });
+    sender
 }

@@ -104,7 +104,11 @@
   {#if player.track}
     <div class="artist-card" transition:fade={{ duration: 200 }}>
       {#if !artistId}
-        <div class="artist-card-status">No catalog artist ID for this track.</div>
+        <div class="artist-card-status">
+          {player.track.uri?.startsWith("spotify:local:")
+            ? "Playing from a file on your computer."
+            : "No catalog artist ID for this track."}
+        </div>
       {:else if artistDetails}
         <div class="artist-card-image-wrap">
           {#if artistDetails.images[0]}
