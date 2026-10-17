@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use librespot_core::session::Session;
-use librespot_core::SpotifyUri;
+use librespot_core::{SpotifyId, SpotifyUri};
 use librespot_metadata::image::ImageSize;
 use librespot_metadata::{Metadata, Track as TrackMetadata};
 use librespot_protocol::autoplay_context_request::AutoplayContextRequest;
+use librespot_protocol::context::Context;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -13,6 +14,8 @@ use crate::spotify_api::models::{Album, Artist, Image, Track};
 const BATCH_SIZE: usize = 25;
 const MAX_CONCURRENT_LOOKUPS: usize = 8;
 const DEFAULT_IMAGE_URL: &str = "https://i.scdn.co/image/{file_id}";
+
+const MAX_STATION_TRACKS: usize = 100;
 
 pub async fn tracks(session: &Session, seed_uri: &str, recent_uris: Vec<String>) -> Result<Vec<Track>, String> {
     let request = AutoplayContextRequest {
@@ -25,27 +28,75 @@ pub async fn tracks(session: &Session, seed_uri: &str, recent_uris: Vec<String>)
         .get_autoplay_context(&request)
         .await
         .map_err(|e| format!("Couldn't get songs to autoplay: {e}"))?;
+    let uris = context_track_uris(&context, &recent_uris, BATCH_SIZE);
+    Ok(look_up(session, uris).await)
+}
 
-    let mut uris: Vec<SpotifyUri> = Vec::new();
-    for uri in context
-        .pages
+/// The radio station Spotify mixes for a song, playlist, album or artist
+/// (a fresh mix each time it's asked).
+pub async fn station(session: &Session, seed_uri: &str) -> Result<Vec<Track>, String> {
+    let station = station_uri(seed_uri).ok_or_else(|| "There's no radio for this".to_string())?;
+    let context = session
+        .spclient()
+        .get_context(&station)
+        .await
+        .map_err(|e| format!("Couldn't load this radio: {e}"))?;
+    let uris = context_track_uris(&context, &[], MAX_STATION_TRACKS);
+    if uris.is_empty() {
+        return Err("Spotify has no songs for this radio".to_string());
+    }
+    Ok(look_up(session, uris).await)
+}
+
+/// Songs by URI (others are skipped), in the order asked.
+pub async fn tracks_by_uri(session: &Session, uris: &[String]) -> Vec<Track> {
+    let uris = uris
         .iter()
-        .flat_map(|page| &page.tracks)
-        .filter_map(|track| track.uri.as_deref())
-    {
-        if !uri.starts_with("spotify:track:") || recent_uris.iter().any(|recent| recent == uri) {
+        .filter_map(|uri| SpotifyUri::from_uri(uri).ok())
+        .filter(|uri| matches!(uri, SpotifyUri::Track { .. }))
+        .collect();
+    look_up(session, uris).await
+}
+
+fn station_uri(seed_uri: &str) -> Option<String> {
+    let mut parts = seed_uri.split(':');
+    let (Some("spotify"), Some(kind), Some(id), None) = (parts.next(), parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    let valid_id = id.len() == 22 && id.chars().all(|c| c.is_ascii_alphanumeric());
+    (valid_id && matches!(kind, "track" | "playlist" | "album" | "artist")).then(|| format!("spotify:station:{kind}:{id}"))
+}
+
+/// Each song in a resolved context once, named by URI or (on some stations) by raw id.
+fn context_track_uris(context: &Context, skip: &[String], limit: usize) -> Vec<SpotifyUri> {
+    let mut uris: Vec<SpotifyUri> = Vec::new();
+    for track in context.pages.iter().flat_map(|page| &page.tracks) {
+        let uri = match track.uri.as_deref().filter(|uri| !uri.is_empty()) {
+            Some(uri) => SpotifyUri::from_uri(uri).ok(),
+            None => track
+                .gid
+                .as_deref()
+                .and_then(|gid| SpotifyId::from_raw(gid).ok())
+                .map(|id| SpotifyUri::Track { id }),
+        };
+        let Some(uri) = uri.filter(|uri| matches!(uri, SpotifyUri::Track { .. })) else {
+            continue;
+        };
+        let Ok(text) = uri.to_uri() else {
+            continue;
+        };
+        if skip.iter().any(|recent| *recent == text) || uris.contains(&uri) {
             continue;
         }
-        if let Ok(uri) = SpotifyUri::from_uri(uri) {
-            if !uris.contains(&uri) {
-                uris.push(uri);
-            }
-        }
-        if uris.len() == BATCH_SIZE {
+        uris.push(uri);
+        if uris.len() == limit {
             break;
         }
     }
+    uris
+}
 
+async fn look_up(session: &Session, uris: Vec<SpotifyUri>) -> Vec<Track> {
     let image_url = session
         .get_user_attribute("image-url")
         .unwrap_or_else(|| DEFAULT_IMAGE_URL.to_string());
@@ -69,7 +120,7 @@ pub async fn tracks(session: &Session, seed_uri: &str, recent_uris: Vec<String>)
         }
     }
     found.sort_by_key(|(index, _)| *index);
-    Ok(found.into_iter().map(|(_, track)| track).collect())
+    found.into_iter().map(|(_, track)| track).collect()
 }
 
 fn to_track(metadata: TrackMetadata, image_url: &str) -> Option<Track> {
@@ -129,5 +180,20 @@ fn nominal_size(size: ImageSize) -> u32 {
         ImageSize::DEFAULT => 300,
         ImageSize::LARGE => 640,
         ImageSize::XLARGE => 1280,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::station_uri;
+
+    #[test]
+    fn stations_exist_for_songs_playlists_albums_and_artists() {
+        let id = "4uLU6hMCjMI75M1A2tKUQC";
+        assert_eq!(station_uri(&format!("spotify:track:{id}")), Some(format!("spotify:station:track:{id}")));
+        assert_eq!(station_uri(&format!("spotify:artist:{id}")), Some(format!("spotify:station:artist:{id}")));
+        assert_eq!(station_uri(&format!("spotify:show:{id}")), None);
+        assert_eq!(station_uri("spotify:track:short"), None);
+        assert_eq!(station_uri(&format!("spotify:track:{id}:extra")), None);
     }
 }

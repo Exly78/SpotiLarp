@@ -9,7 +9,6 @@
 
 <script>
   import * as api from "../../api.js";
-  import { refreshLiked } from "../../likes.svelte.js";
   import { openArtist } from "../../nav.svelte.js";
   import { coverAtLeast } from "../../utils.js";
   import TrackList from "../TrackList.svelte";
@@ -74,7 +73,6 @@
       if (range !== selected) return;
       tracks = topTracks;
       artists = topArtists;
-      refreshLiked(topTracks.map((t) => t.id));
     } catch (e) {
       if (range === selected) error = `Couldn't load your stats: ${e}`;
     } finally {
@@ -136,7 +134,7 @@
 
   {#if tracks.length > 0}
     <Section title="Top tracks">
-      <TrackList tracks={tracks} contextName={`Top tracks: ${rangeLabel}`} />
+      <TrackList tracks={tracks} contextName={`Top tracks: ${rangeLabel}`} contextView={{ type: "stats" }} primary />
     </Section>
   {/if}
 
@@ -170,7 +168,7 @@
   transition: background-color var(--transition);
 }
 .tab:hover {
-  background: #3a3a3a;
+  background: var(--control-hover);
 }
 .tab.active {
   background: var(--text);

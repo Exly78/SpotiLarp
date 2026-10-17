@@ -3,13 +3,18 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../api.js";
   import { menu, closeMenu } from "../contextMenu.svelte.js";
-  import { addToQueue, playNext } from "../queue.svelte.js";
-  import { likedIds, refreshLiked, toggleLike } from "../likes.svelte.js";
+  import { addManyToQueue, playManyNext } from "../queue.svelte.js";
+  import { likedIds, refreshLiked, toggleLike, likeTracks } from "../likes.svelte.js";
   import { library, ownedPlaylists, createPlaylist, adjustTrackCount } from "../library.svelte.js";
-  import { openArtist, openAlbum } from "../nav.svelte.js";
+  import { openArtist, openAlbum, openRadio, openShow } from "../nav.svelte.js";
+  import { isEpisode, isPlayed, setPlayed } from "../podcasts.svelte.js";
   import { notify } from "../toast.svelte.js";
+  import { trackLink } from "../links.js";
+  import { smallestCover } from "../utils.js";
   import { LOCAL_URI_PREFIX } from "../constants.js";
   import Icon from "./Icon.svelte";
+
+  /** @typedef {import("../types.js").Track} Track */
 
   const EDGE_MARGIN = 8;
 
@@ -24,11 +29,11 @@
   const top = $derived(Math.max(EDGE_MARGIN, Math.min(menu.y, window.innerHeight - height - EDGE_MARGIN)));
 
   $effect(() => {
-    const id = menu.open ? menu.track?.id : null;
+    const ids = menu.open ? menu.tracks.map((t) => t.id) : [];
     untrack(() => {
       page = "main";
       newName = "";
-      if (id) refreshLiked([id]);
+      if (ids.length > 0) refreshLiked(ids);
     });
   });
 
@@ -38,11 +43,13 @@
     action();
   }
 
-  /** @param {string} url */
-  async function copyLink(url) {
+  /** @param {Track[]} tracks */
+  async function copyLinks(tracks) {
+    const links = tracks.map(trackLink).filter(Boolean);
+    if (links.length === 0) return;
     try {
-      await navigator.clipboard.writeText(url);
-      notify("Link copied");
+      await navigator.clipboard.writeText(links.join("\n"));
+      notify(links.length === 1 ? "Link copied" : `Copied ${links.length} song links`);
     } catch (e) {
       notify(`Couldn't copy the link: ${e}`);
     }
@@ -54,30 +61,60 @@
   }
 
   /**
-   * @param {import("../types.js").Playlist} playlist
-   * @param {import("../types.js").Track} track
+   * Songs that can go in a playlist: Spotify songs and local files (not
+   * podcast episodes, which SpotiLarp's playlists leave out).
+   * @param {Track[]} tracks
    */
-  async function addTo(playlist, track) {
-    closeMenu();
+  function addable(tracks) {
+    return tracks.filter((t) => !isEpisode(t) && (t.id || t.uri.startsWith(LOCAL_URI_PREFIX)));
+  }
+
+  /**
+   * Opens an episode's show, asking Spotify which one it is if need be.
+   * @param {Track} track
+   */
+  async function goToShow(track) {
+    if (track.show) return openShow(track.show);
     try {
-      await api.addToPlaylist(playlist.id, [track.uri]);
-      adjustTrackCount(playlist.id, 1);
-      notify(`Added to ${playlist.name}`);
+      const episode = await api.getEpisode(track.id);
+      openShow(episode.show);
     } catch (e) {
-      notify(`Couldn't add it to ${playlist.name}: ${e}`);
+      notify(`Couldn't find the podcast: ${e}`);
     }
   }
 
-  /** @param {import("../types.js").Track} track */
-  async function addToNew(track) {
+  /**
+   * @param {import("../types.js").Playlist} playlist
+   * @param {Track[]} tracks
+   */
+  async function addTo(playlist, tracks) {
+    closeMenu();
+    const songs = addable(tracks);
+    if (songs.length === 0) return;
+    try {
+      await api.addToPlaylist(playlist.id, songs.map((t) => t.uri));
+      adjustTrackCount(playlist.id, songs.length);
+      notify(songs.length === 1 ? `Added to ${playlist.name}` : `Added ${songs.length} songs to ${playlist.name}`);
+    } catch (e) {
+      notify(`Couldn't add to ${playlist.name}: ${e}`);
+    }
+  }
+
+  /** @param {Track[]} tracks */
+  async function addToNew(tracks) {
     const name = newName.trim();
     if (!name) return;
     closeMenu();
     try {
-      await addTo(await createPlaylist(name), track);
+      await addTo(await createPlaylist(name), tracks);
     } catch (e) {
       notify(`Couldn't create the playlist: ${e}`);
     }
+  }
+
+  /** @param {Track} track */
+  function songRadio(track) {
+    openRadio(`spotify:track:${track.id}`, track.name, smallestCover(track.album.images));
   }
 
   /** @param {PointerEvent} evt */
@@ -106,8 +143,13 @@
 
 {#if menu.open && menu.track}
   {@const track = menu.track}
-  {@const link = track.id ? `https://open.spotify.com/track/${track.id}` : ""}
-  {@const local = track.uri.startsWith(LOCAL_URI_PREFIX)}
+  {@const tracks = menu.tracks}
+  {@const many = tracks.length > 1}
+  {@const link = many ? "" : trackLink(track)}
+  {@const canAdd = addable(tracks).length > 0}
+  {@const likeable = tracks.filter((t) => t.id && !isEpisode(t))}
+  {@const episode = !many && isEpisode(track)}
+  {@const allLiked = likeable.length > 0 && likeable.every((t) => likedIds.has(t.id))}
   {@const artist = track.artists.find((a) => a.id)}
   <div
     class="menu"
@@ -126,26 +168,29 @@
         class="new-name"
         placeholder="New playlist name"
         bind:value={newName}
-        onkeydown={(e) => e.key === "Enter" && addToNew(track)}
+        onkeydown={(e) => e.key === "Enter" && addToNew(tracks)}
         spellcheck="false"
         aria-label="New playlist name"
       />
       {#if newName.trim()}
-        <button type="button" role="menuitem" onclick={() => addToNew(track)}>
+        <button type="button" role="menuitem" onclick={() => addToNew(tracks)}>
           Create "{newName.trim()}"
         </button>
       {/if}
       <div class="playlists">
         {#each ownedPlaylists() as playlist (playlist.id)}
-          <button type="button" role="menuitem" onclick={() => addTo(playlist, track)}>{playlist.name}</button>
+          <button type="button" role="menuitem" onclick={() => addTo(playlist, tracks)}>{playlist.name}</button>
         {:else}
           <div class="empty">{library.loading ? "Loading playlists..." : "You don't have your own playlists yet."}</div>
         {/each}
       </div>
     {:else}
-      <button type="button" role="menuitem" onclick={() => run(() => playNext(track))}>Play next</button>
-      <button type="button" role="menuitem" onclick={() => run(() => addToQueue(track))}>Add to queue</button>
-      {#if link || local}
+      {#if many}
+        <div class="heading">{tracks.length} songs selected</div>
+      {/if}
+      <button type="button" role="menuitem" onclick={() => run(() => playManyNext(tracks))}>Play next</button>
+      <button type="button" role="menuitem" onclick={() => run(() => addManyToQueue(tracks))}>Add to queue</button>
+      {#if canAdd}
         <div class="divider"></div>
         <button type="button" role="menuitem" class="has-sub" onclick={() => (page = "playlists")}>
           Add to playlist <Icon name="chevron-right" size={14} />
@@ -154,14 +199,29 @@
           {@const remove = menu.onRemove}
           <button type="button" role="menuitem" onclick={() => run(remove)}>Remove from this playlist</button>
         {/if}
-        {#if link}
+        {#if many && likeable.length > 0 && !allLiked}
+          <button type="button" role="menuitem" onclick={() => run(() => likeTracks(likeable.map((t) => t.id)))}>
+            Save to Liked Songs
+          </button>
+        {:else if !many && track.id}
           <button type="button" role="menuitem" onclick={() => run(() => toggleLike(track.id))}>
             {likedIds.has(track.id) ? "Remove from Liked Songs" : "Save to Liked Songs"}
           </button>
         {/if}
       {/if}
-      {#if artist || track.album.id}
+      {#if episode}
         <div class="divider"></div>
+        <button type="button" role="menuitem" onclick={() => run(() => setPlayed(track, !isPlayed(track)))}>
+          {isPlayed(track) ? "Mark as unplayed" : "Mark as played"}
+        </button>
+        {#if track.id}
+          <button type="button" role="menuitem" onclick={() => run(() => goToShow(track))}>Go to podcast</button>
+        {/if}
+      {:else if !many && (artist || track.album.id || track.id)}
+        <div class="divider"></div>
+        {#if track.id}
+          <button type="button" role="menuitem" onclick={() => run(() => songRadio(track))}>Go to song radio</button>
+        {/if}
         {#if artist}
           <button type="button" role="menuitem" onclick={() => run(() => openArtist(artist))}>Go to artist</button>
         {/if}
@@ -169,9 +229,14 @@
           <button type="button" role="menuitem" onclick={() => run(() => openAlbum(track.album))}>Go to album</button>
         {/if}
       {/if}
-      {#if link}
+      {#if many && likeable.length > 0}
         <div class="divider"></div>
-        <button type="button" role="menuitem" onclick={() => run(() => copyLink(link))}>Copy song link</button>
+        <button type="button" role="menuitem" onclick={() => run(() => copyLinks(tracks))}>Copy song links</button>
+      {:else if link}
+        <div class="divider"></div>
+        <button type="button" role="menuitem" onclick={() => run(() => copyLinks([track]))}>
+          {episode ? "Copy episode link" : "Copy song link"}
+        </button>
         <button type="button" role="menuitem" onclick={() => run(() => openInSpotify(link))}>Open in Spotify</button>
       {/if}
     {/if}
@@ -207,13 +272,19 @@
   text-overflow: ellipsis;
 }
 .menu button:hover {
-  background: #3e3e3e;
+  background: var(--highlight-strong);
 }
 .has-sub {
   justify-content: space-between;
 }
 .back {
   font-weight: var(--fw-bold);
+}
+.heading {
+  padding: 0.5em 0.8em 0.3em;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
 }
 .divider {
   height: 1px;

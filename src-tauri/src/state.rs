@@ -14,6 +14,7 @@ use crate::local_files::LocalIndex;
 use crate::media::MediaUpdate;
 use crate::playback::events::EventSender;
 use crate::playback::local::LocalPlayer;
+use crate::remote::RemoteCommand;
 use crate::spotify_api::client::SpotifyClient;
 
 pub struct PlaybackHandle {
@@ -42,6 +43,12 @@ pub struct AppState {
     /// Whether the local player (rather than librespot) owns playback.
     pub local_active: AtomicBool,
     pub playback_events: OnceLock<EventSender>,
+    /// Commands this launch was started with (`spotilarp <link>`), until the UI takes them.
+    pub pending_commands: std::sync::Mutex<Vec<RemoteCommand>>,
+    /// Whether the main window is minimized or in the tray (background.rs).
+    pub background: AtomicBool,
+    /// Which run of the page's clock is current (background.rs).
+    pub clock_generation: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {

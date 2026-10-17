@@ -1,13 +1,20 @@
+<script module>
+  const NEW_EPISODES_FRESH_MS = 15 * 60 * 1000;
+  /** @type {{ key: string, at: number, episodes: import("../../types.js").Track[] }} */
+  let newEpisodesCache = { key: "", at: 0, episodes: [] };
+</script>
+
 <script>
   import { untrack } from "svelte";
   import * as api from "../../api.js";
   import { playFromList } from "../../queue.svelte.js";
-  import { refreshLiked } from "../../likes.svelte.js";
   import { library } from "../../library.svelte.js";
-  import { navigate, openArtist } from "../../nav.svelte.js";
+  import { navigate, openArtist, openShow } from "../../nav.svelte.js";
+  import { episodeTrack, continueListening, isPlayed } from "../../podcasts.svelte.js";
   import { coverAtLeast, smallestCover } from "../../utils.js";
   import { LIKED_SONGS_ID } from "../../constants.js";
   import TrackList from "../TrackList.svelte";
+  import EpisodeList from "../EpisodeList.svelte";
   import MediaCard from "../MediaCard.svelte";
   import Section from "../Section.svelte";
 
@@ -16,6 +23,11 @@
 
   const RECENT_TILES = 8;
   const PLAYLIST_CARDS = 12;
+  /** New episodes come from this many podcasts, most recently followed first (one request each). */
+  const NEW_EPISODE_SHOWS = 8;
+  const NEW_EPISODES = 5;
+  const NEW_EPISODE_DAYS = 14;
+  const CONTINUE_EPISODES = 4;
 
   /** @type {import("../../types.js").Track[]} */
   let recent = $state([]);
@@ -23,6 +35,47 @@
   let topTracks = $state([]);
   /** @type {import("../../types.js").ArtistDetails[]} */
   let topArtists = $state([]);
+  /** @type {import("../../types.js").Track[]} */
+  let newEpisodes = $state([]);
+  let newEpisodesFor = "";
+
+  const continuing = $derived(continueListening(CONTINUE_EPISODES));
+  const unplayedNew = $derived(newEpisodes.filter((e) => !isPlayed(e)).slice(0, NEW_EPISODES));
+
+  // Follows the podcasts in Your Library (loaded after Home first shows).
+  $effect(() => {
+    const shows = library.shows.slice(0, NEW_EPISODE_SHOWS);
+    const key = shows.map((s) => s.id).join(",");
+    if (!loggedIn || key === newEpisodesFor) return;
+    newEpisodesFor = key;
+    untrack(() => loadNewEpisodes(shows));
+  });
+
+  /** @param {import("../../types.js").Show[]} shows */
+  async function loadNewEpisodes(shows) {
+    if (shows.length === 0) {
+      newEpisodes = [];
+      return;
+    }
+    const key = newEpisodesFor;
+    if (newEpisodesCache.key === key && Date.now() - newEpisodesCache.at < NEW_EPISODES_FRESH_MS) {
+      newEpisodes = newEpisodesCache.episodes;
+      return;
+    }
+    try {
+      const latest = await api.getLatestEpisodes(
+        shows.map((s) => s.id),
+        3,
+      );
+      if (key !== newEpisodesFor) return;
+      const since = new Date(Date.now() - NEW_EPISODE_DAYS * 86400000).toISOString().slice(0, 10);
+      newEpisodes = latest
+        .flatMap((episodes, i) => episodes.map((episode) => episodeTrack(episode, shows[i])))
+        .filter((episode) => (episode.release_date ?? "") >= since)
+        .sort((a, b) => (b.release_date ?? "").localeCompare(a.release_date ?? ""));
+      newEpisodesCache = { key, at: Date.now(), episodes: newEpisodes };
+    } catch {}
+  }
 
   const greeting = $derived.by(() => {
     const hour = new Date().getHours();
@@ -44,6 +97,8 @@
       recent = [];
       topTracks = [];
       topArtists = [];
+      newEpisodes = [];
+      newEpisodesFor = "";
     } else if (!loadedForLogin) {
       loadedForLogin = true;
       untrack(load);
@@ -59,7 +114,6 @@
       .getTopTracks("short_term", 20)
       .then((tracks) => {
         topTracks = tracks;
-        refreshLiked(tracks.map((t) => t.id));
       })
       .catch(() => {});
     api
@@ -102,6 +156,18 @@
     </div>
   {/if}
 
+  {#if continuing.length > 0}
+    <Section title="Continue listening">
+      <EpisodeList episodes={continuing} contextName="Continue listening" showShow />
+    </Section>
+  {/if}
+
+  {#if unplayedNew.length > 0}
+    <Section title="New episodes">
+      <EpisodeList episodes={unplayedNew} contextName="New episodes" showShow />
+    </Section>
+  {/if}
+
   {#if topTracks.length > 0}
     <Section title="Your top tracks this month">
       <TrackList tracks={topTracks.slice(0, 10)} contextName="Your top tracks" />
@@ -138,6 +204,14 @@
       />
     {/each}
   </Section>
+
+  {#if library.shows.length > 0}
+    <Section title="Your podcasts" grid>
+      {#each library.shows.slice(0, PLAYLIST_CARDS) as show (show.id)}
+        <MediaCard image={coverAtLeast(show.images, 200)} title={show.name} subtitle="Podcast" onclick={() => openShow(show)} />
+      {/each}
+    </Section>
+  {/if}
 {/if}
 
 <style>
@@ -198,7 +272,7 @@
   overflow: hidden;
   border: none;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.07);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
   font: inherit;
   text-align: left;
@@ -206,7 +280,7 @@
   transition: background-color var(--transition);
 }
 .tile:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
 }
 .tile img,
 .tile-placeholder {

@@ -1,36 +1,56 @@
+<script module>
+  /** The list keyboard shortcuts (Ctrl+A, Ctrl+C, Delete...) act on: the last one used, or a page's primary list. */
+  const lists = { active: /** @type {symbol|null} */ (null) };
+</script>
+
 <script>
+  import { onDestroy, untrack } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { playFromList } from "../queue.svelte.js";
   import { player } from "../player.svelte.js";
-  import { likedIds, likeBusy, toggleLike } from "../likes.svelte.js";
-  import { openTrackMenu } from "../contextMenu.svelte.js";
+  import { likedIds, likeBusy, toggleLike, queueLikedCheck } from "../likes.svelte.js";
+  import { menu, openTracksMenu } from "../contextMenu.svelte.js";
   import { openArtist, openAlbum } from "../nav.svelte.js";
   import { drag, startTrackDrag, endDrag, insertionIndex } from "../drag.svelte.js";
+  import { notify } from "../toast.svelte.js";
+  import { trackLink, trackUrisIn } from "../links.js";
+  import { isTextField } from "../keys.js";
   import { smallestCover, formatTime, formatCount } from "../utils.js";
   import Icon from "./Icon.svelte";
 
+  /** @typedef {import("../types.js").Track} Track */
+
   /**
    * Rows may carry `playcount` and `explicit` (an artist's popular tracks do).
+   * Ctrl/Shift+click selects rows; a plain click plays.
    * @type {{
-   *   tracks: (import("../types.js").Track & { playcount?: number|null, explicit?: boolean })[],
+   *   tracks: (Track & { playcount?: number|null, explicit?: boolean })[],
    *   contextName?: string,
-   *   allTracks?: import("../types.js").Track[],
+   *   contextView?: import("../nav.svelte.js").View|null,
+   *   allTracks?: Track[],
+   *   primary?: boolean,
    *   showHeader?: boolean,
    *   showArtists?: boolean,
    *   showAlbum?: boolean,
    *   showDateAdded?: boolean,
    *   showPlaycount?: boolean,
    *   showCovers?: boolean,
-   *   onRemove?: (track: import("../types.js").Track) => void,
+   *   onRemove?: (tracks: Track[]) => void,
    *   onReorder?: (from: number, insertBefore: number) => void,
+   *   onPaste?: (uris: string[]) => void,
    * }}
    */
   let {
     tracks,
     contextName = "",
+    // The page these rows belong to, for "Playing from" in the queue.
+    contextView = null,
     // When `tracks` shows only the first few of a list, the whole list to queue.
     allTracks,
+    // The page's main list, which Ctrl+A selects before any list is clicked.
+    primary = false,
     showHeader = true,
     showArtists = true,
     showAlbum = true,
@@ -39,16 +59,49 @@
     showCovers = true,
     onRemove,
     onReorder,
+    onPaste,
   } = $props();
 
   const origin = Symbol("track-list");
   let dropIndex = $state(-1);
+  /** Indices into `tracks`. */
+  const selected = new SvelteSet();
+  let anchor = -1;
 
   const FIRST_BATCH = 120;
   const BATCH = 400;
   const ANIMATED_ROWS = 20;
 
   let shown = $state(FIRST_BATCH);
+
+  // Liked hearts are asked about as rows come near the screen, so a long
+  // playlist doesn't cost a request per 40 songs every time it opens.
+  /** @type {IntersectionObserver|null} */
+  const likeWatcher =
+    typeof IntersectionObserver === "undefined"
+      ? null
+      : new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              const el = /** @type {HTMLElement} */ (entry.target);
+              queueLikedCheck(el.dataset.likeId ?? "");
+              likeWatcher?.unobserve(el);
+            }
+          },
+          { rootMargin: "800px 0px" },
+        );
+  onDestroy(() => likeWatcher?.disconnect());
+  /** @type {HTMLUListElement|undefined} */
+  let listEl = $state();
+
+  // Rows come and go (and are reused for other songs) as the list changes.
+  $effect(() => {
+    visible;
+    const list = listEl;
+    if (!list || !likeWatcher) return;
+    for (const row of list.querySelectorAll("li[data-like-id]")) likeWatcher.observe(row);
+  });
   const visible = $derived(tracks.length > shown ? tracks.slice(0, shown) : tracks);
 
   $effect(() => {
@@ -64,6 +117,23 @@
     return () => cancelAnimationFrame(frame);
   });
 
+  // Filtering, sorting or reloading changes what the indices mean.
+  $effect(() => {
+    tracks;
+    untrack(() => {
+      selected.clear();
+      anchor = -1;
+    });
+  });
+
+  $effect(() => {
+    if (primary && lists.active === null) lists.active = origin;
+  });
+
+  onDestroy(() => {
+    if (lists.active === origin) lists.active = null;
+  });
+
   const dateFormatter = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" });
 
   /** @param {string|null|undefined} date */
@@ -73,12 +143,57 @@
     return Number.isNaN(parsed.getTime()) ? "" : dateFormatter.format(parsed);
   }
 
+  /** The selected rows, in the order shown. */
+  function selectedTracks() {
+    return [...selected].sort((a, b) => a - b).map((i) => tracks[i]).filter(Boolean);
+  }
+
+  /**
+   * @param {MouseEvent} evt
+   * @param {number} index
+   */
+  function onRowClick(evt, index) {
+    lists.active = origin;
+    if (evt.shiftKey) {
+      const from = anchor >= 0 ? anchor : index;
+      selected.clear();
+      for (let i = Math.min(from, index); i <= Math.max(from, index); i++) selected.add(i);
+      anchor = from;
+      return;
+    }
+    if (evt.ctrlKey || evt.metaKey) {
+      if (selected.has(index)) selected.delete(index);
+      else selected.add(index);
+      anchor = index;
+      return;
+    }
+    selected.clear();
+    anchor = index;
+    playFromList(allTracks ?? tracks, index, contextName, contextView);
+  }
+
+  /** @param {MouseEvent} evt */
+  function onRowMouseDown(evt) {
+    // Shift+click would otherwise select the page's text.
+    if (evt.shiftKey) evt.preventDefault();
+  }
+
+  /**
+   * @param {DragEvent} evt
+   * @param {number} index
+   */
+  function onDragStart(evt, index) {
+    lists.active = origin;
+    const dragging = selected.has(index) ? selectedTracks() : [tracks[index]];
+    startTrackDrag(evt, dragging, origin, index);
+  }
+
   /**
    * @param {DragEvent & { currentTarget: HTMLElement }} evt
    * @param {number} index
    */
   function onRowDragOver(evt, index) {
-    if (!onReorder || drag.origin !== origin) return;
+    if (!onReorder || drag.origin !== origin || drag.tracks.length !== 1) return;
     evt.preventDefault();
     if (evt.dataTransfer) evt.dataTransfer.dropEffect = "move";
     dropIndex = insertionIndex(evt, index);
@@ -101,15 +216,82 @@
 
   /**
    * @param {MouseEvent} evt
-   * @param {import("../types.js").Track} track
+   * @param {number} index
    */
-  function onContextMenu(evt, track) {
-    openTrackMenu(evt, track, onRemove && (() => onRemove(track)));
+  function onContextMenu(evt, index) {
+    lists.active = origin;
+    if (!selected.has(index)) {
+      selected.clear();
+      anchor = index;
+    }
+    const chosen = selected.size > 1 ? selectedTracks() : [tracks[index]];
+    openTracksMenu(evt, chosen, onRemove && (() => onRemove(chosen)));
+  }
+
+  /**
+   * @param {Event} evt
+   * @param {boolean} [textMayBeSelected] whether a text selection on the page should take precedence
+   */
+  function listShortcutsApply(evt, textMayBeSelected = false) {
+    if (lists.active !== origin || menu.open || isTextField(evt.target)) return false;
+    return !textMayBeSelected || !window.getSelection()?.toString();
+  }
+
+  /** @param {KeyboardEvent} evt */
+  function onWindowKeydown(evt) {
+    if (!listShortcutsApply(evt)) return;
+    const ctrl = evt.ctrlKey || evt.metaKey;
+    if (ctrl && !evt.shiftKey && !evt.altKey && evt.key.toLowerCase() === "a") {
+      evt.preventDefault();
+      for (let i = 0; i < tracks.length; i++) selected.add(i);
+    } else if (evt.key === "Escape" && selected.size > 0) {
+      selected.clear();
+    } else if (evt.key === "Delete" && onRemove && selected.size > 0) {
+      evt.preventDefault();
+      onRemove(selectedTracks());
+    }
+  }
+
+  /**
+   * Ctrl+C and Ctrl+X put the selected songs' links on the clipboard, one per
+   * line, ready to paste in a playlist here or in Spotify.
+   * @param {ClipboardEvent} evt
+   * @param {boolean} cut
+   */
+  function copySelection(evt, cut) {
+    if (!listShortcutsApply(evt, true) || selected.size === 0) return;
+    const chosen = selectedTracks();
+    const links = chosen.map(trackLink).filter(Boolean);
+    if (links.length === 0 || !evt.clipboardData) return;
+    evt.preventDefault();
+    evt.clipboardData.setData("text/plain", links.join("\n"));
+    if (cut && onRemove) {
+      onRemove(chosen);
+    } else {
+      notify(links.length === 1 ? "Link copied" : `Copied ${links.length} song links`);
+    }
+  }
+
+  /** @param {ClipboardEvent} evt */
+  function onWindowPaste(evt) {
+    if (!onPaste || !listShortcutsApply(evt)) return;
+    const uris = trackUrisIn(evt.clipboardData?.getData("text/plain") ?? "");
+    if (uris.length === 0) return;
+    evt.preventDefault();
+    onPaste(uris);
   }
 </script>
 
+<svelte:window
+  onkeydown={onWindowKeydown}
+  oncopy={(e) => copySelection(e, false)}
+  oncut={(e) => copySelection(e, true)}
+  onpaste={onWindowPaste}
+/>
+
 <ul
   class="track-list"
+  bind:this={listEl}
   class:with-album={showAlbum}
   class:with-date={showDateAdded}
   class:with-plays={showPlaycount}
@@ -129,14 +311,16 @@
     <li
       class="row"
       class:playing={track.id ? track.id === player.track?.trackId : !!player.track?.uri && track.uri === player.track.uri}
+      class:selected={selected.has(i)}
       class:drop-before={dropIndex === i}
       class:drop-after={dropIndex === tracks.length && i === tracks.length - 1}
       draggable="true"
-      ondragstart={(e) => startTrackDrag(e, [track], origin, i)}
+      ondragstart={(e) => onDragStart(e, i)}
       ondragend={onDragEnd}
       ondragover={(e) => onRowDragOver(e, i)}
       ondrop={onRowDrop}
-      oncontextmenu={(e) => onContextMenu(e, track)}
+      oncontextmenu={(e) => onContextMenu(e, i)}
+      data-like-id={track.id || undefined}
       in:fly={{
         y: 8,
         duration: i < ANIMATED_ROWS ? 220 : 0,
@@ -147,7 +331,8 @@
       <button
         type="button"
         class="hit"
-        onclick={() => playFromList(allTracks ?? tracks, i, contextName)}
+        onmousedown={onRowMouseDown}
+        onclick={(e) => onRowClick(e, i)}
         aria-label={`Play ${track.name}`}
       ></button>
       <span class="index">{i + 1}</span>
@@ -263,6 +448,10 @@
 }
 .row:not(.header):hover {
   background-color: var(--surface-hover);
+}
+.row.selected,
+.row.selected:hover {
+  background-color: var(--selected-row-bg);
 }
 .row.drop-before {
   box-shadow: inset 0 2px 0 var(--accent);

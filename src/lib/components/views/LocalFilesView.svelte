@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
-  import { queue, playFromList } from "../../queue.svelte.js";
+  import { playFromList } from "../../queue.svelte.js";
   import { localFiles, loadLocalFiles, rescanLocalFiles, addLocalFolder } from "../../localFiles.svelte.js";
   import { navigate } from "../../nav.svelte.js";
   import { notify } from "../../toast.svelte.js";
@@ -48,8 +48,7 @@
 
   function playAll() {
     if (visibleTracks.length === 0) return;
-    const start = queue.shuffle ? Math.floor(Math.random() * visibleTracks.length) : 0;
-    playFromList(visibleTracks, start, NAME);
+    playFromList(visibleTracks, -1, NAME, { type: "local" });
   }
 
   async function addFolder() {
@@ -149,7 +148,7 @@
 {:else if visibleTracks.length === 0}
   <div class="empty-state">No tracks match "{filter}".</div>
 {:else}
-  <TrackList tracks={visibleTracks} contextName={NAME} showDateAdded />
+  <TrackList tracks={visibleTracks} contextName={NAME} contextView={{ type: "local" }} primary showDateAdded />
 {/if}
 
 <style>

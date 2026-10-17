@@ -29,9 +29,45 @@
  * @property {Track[]} tracks
  * @property {ArtistDetails[]} artists
  * @property {Album[]} albums
+ * @property {Show[]} shows
+ * @property {Episode[]} episodes
  */
 
 /**
+ * A podcast.
+ * @typedef {Object} Show
+ * @property {string} id
+ * @property {string} name
+ * @property {Image[]} images
+ * @property {string} [description]
+ * @property {number|null} [total_episodes]
+ * @property {boolean} [explicit]
+ */
+
+/**
+ * A podcast episode as Spotify describes it; `episodeTrack` turns it into a
+ * Track to play.
+ * @typedef {Object} Episode
+ * @property {string} id
+ * @property {string} name
+ * @property {string} uri
+ * @property {number} duration_ms
+ * @property {string} description
+ * @property {Image[]} images
+ * @property {string|null} [release_date]
+ * @property {boolean} explicit
+ * @property {boolean} is_playable
+ * @property {Show|null} [show] only when one episode was asked for
+ */
+
+/**
+ * @typedef {Object} EpisodePage
+ * @property {Episode[]} items
+ * @property {number} total
+ */
+
+/**
+ * A song, or a podcast episode (`show` set, or a `spotify:episode:` URI).
  * @typedef {Object} Track
  * @property {string} id
  * @property {string} name
@@ -41,6 +77,10 @@
  * @property {Album} album
  * @property {string|null} [added_at]
  * @property {number|null} [position]
+ * @property {{ id: string, name: string }|null} [show] the podcast, for episodes
+ * @property {string|null} [release_date] episodes only
+ * @property {string} [description] episodes only
+ * @property {boolean} [playable] episodes only: false when Spotify won't play it here
  */
 
 /**
@@ -132,6 +172,8 @@
  * @property {PlaylistTrackCount} track_count
  * @property {{ id: string, display_name?: string|null }|null} [owner]
  * @property {boolean} [collaborative]
+ * @property {string|null} [description]
+ * @property {boolean|null} [public]
  * @property {boolean} [isLikedSongs]
  */
 
@@ -168,6 +210,27 @@
  * @property {boolean} instrumental
  * @property {LyricLine[]|null} synced
  * @property {string|null} plain
+ * @property {"spotify"|"lrclib"} [source]
+ */
+
+/**
+ * One row of the library's playlist order (from the playback session), folders included.
+ * @typedef {{ type: "playlist", id: string }
+ *   | { type: "folder_start", id: string, name: string }
+ *   | { type: "folder_end" }} RootlistEntry
+ */
+
+/**
+ * A command from the command line (`spotilarp next`) or a launch with a link.
+ * @typedef {{ action: "toggle"|"play"|"pause"|"next"|"previous"|"mute"|"like"|"show"|"reset_theme" }
+ *   | { action: "volume", percent: number }
+ *   | { action: "volume_by", delta: number }
+ *   | { action: "shuffle", mode: "off"|"on"|"smart"|null }
+ *   | { action: "repeat", mode: string|null }
+ *   | { action: "seek_by", seconds: number }
+ *   | { action: "seek_to", seconds: number }
+ *   | { action: "open", link: string }
+ *   | { action: "search", query: string }} RemoteCommand
  */
 
 /**

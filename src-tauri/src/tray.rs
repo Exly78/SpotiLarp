@@ -10,6 +10,7 @@ pub fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        crate::background::update(&window);
     }
 }
 

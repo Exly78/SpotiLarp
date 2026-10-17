@@ -1,4 +1,5 @@
 mod auth;
+mod background;
 mod commands;
 mod config;
 mod discord;
@@ -7,8 +8,12 @@ mod local_files;
 mod lyrics;
 mod media;
 mod playback;
+mod remote;
 mod spotify_api;
 mod state;
+mod themes;
+#[cfg(target_os = "windows")]
+mod thumbbar;
 mod tray;
 mod window_state;
 
@@ -32,11 +37,13 @@ pub fn run() {
 
     let discord_sender = config::load_discord_client_id().map(discord::spawn);
     let settings = config::load_settings();
+    let launch_command = remote::parse(&std::env::args().collect::<Vec<_>>());
     commands::apply_audio_settings(&settings);
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match remote::parse(&args) {
+            Some(command) => remote::dispatch(app, command),
+            None => tray::show_main_window(app),
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -60,10 +67,14 @@ pub fn run() {
             local_player: std::sync::OnceLock::new(),
             local_active: std::sync::atomic::AtomicBool::new(false),
             playback_events: std::sync::OnceLock::new(),
+            pending_commands: std::sync::Mutex::new(launch_command.into_iter().collect()),
+            background: std::sync::atomic::AtomicBool::new(false),
+            clock_generation: std::sync::atomic::AtomicU64::new(0),
         })
         .register_uri_scheme_protocol(local_files::COVER_SCHEME, |_ctx, request| {
             local_files::serve_cover(&request)
         })
+        .register_uri_scheme_protocol(themes::THEME_SCHEME, |_ctx, request| themes::serve(&request))
         .setup(|app| {
             #[cfg(target_os = "windows")]
             let hwnd = main_window_handle(app);
@@ -83,6 +94,11 @@ pub fn run() {
 
             let tray_created = tray::create(app).is_ok();
 
+            #[cfg(target_os = "windows")]
+            if let Some(hwnd) = hwnd {
+                thumbbar::attach(app.handle(), hwnd);
+            }
+
             if let Some(window) = app.get_webview_window("main") {
                 window_state::restore(&window);
                 let minimized_start = std::env::args().any(|arg| arg == MINIMIZED_ARG);
@@ -93,23 +109,39 @@ pub fn run() {
                 if minimized_start && !to_tray {
                     let _ = window.minimize();
                 }
+                background::update(&window);
             }
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if let Some(webview_window) = window.app_handle().get_webview_window(window.label()) {
-                    window_state::save(&webview_window);
+            let webview_window = || window.app_handle().get_webview_window(window.label());
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let webview_window = webview_window();
+                    if let Some(webview_window) = &webview_window {
+                        window_state::save(webview_window);
+                    }
+                    let close_to_tray = window.state::<AppState>().settings().close_to_tray;
+                    if window.label() == "main" && close_to_tray {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        if let Some(webview_window) = &webview_window {
+                            background::update(webview_window);
+                        }
+                    }
                 }
-                let close_to_tray = window.state::<AppState>().settings().close_to_tray;
-                if window.label() == "main" && close_to_tray {
-                    api.prevent_close();
-                    let _ = window.hide();
+                // Minimizing and restoring come as these.
+                WindowEvent::Resized(_) | WindowEvent::Focused(_) => {
+                    if let Some(webview_window) = webview_window() {
+                        background::update(&webview_window);
+                    }
                 }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
             commands::has_client_id,
+            commands::get_client_id,
             commands::set_client_id,
             commands::login,
             commands::cancel_login,
@@ -121,6 +153,13 @@ pub fn run() {
             commands::play_track,
             commands::preload_track,
             commands::get_autoplay_tracks,
+            commands::get_radio_tracks,
+            commands::take_launch_commands,
+            commands::get_tracks_by_uri,
+            commands::get_playlist,
+            commands::get_library_folders,
+            commands::quit_app,
+            commands::update_playlist_details,
             commands::search,
             commands::search_all,
             commands::search_tracks_page,
@@ -130,6 +169,13 @@ pub fn run() {
             commands::get_saved_albums,
             commands::save_album,
             commands::remove_album,
+            commands::get_saved_shows,
+            commands::get_show,
+            commands::get_show_episodes,
+            commands::get_latest_episodes,
+            commands::get_episode,
+            commands::save_show,
+            commands::remove_show,
             commands::get_recently_played,
             commands::get_top_tracks,
             commands::get_top_artists,
@@ -171,7 +217,13 @@ pub fn run() {
             commands::preview_equalizer,
             commands::pick_folder,
             commands::get_local_files,
-            commands::rescan_local_files
+            commands::rescan_local_files,
+            commands::window_hidden,
+            commands::set_clock,
+            commands::list_themes,
+            commands::get_theme,
+            commands::import_themes,
+            commands::open_themes_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

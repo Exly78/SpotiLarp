@@ -1,11 +1,12 @@
 <script>
   import { onMount } from "svelte";
   import * as api from "../../api.js";
-  import { refreshLiked } from "../../likes.svelte.js";
-  import { openArtist, openAlbum } from "../../nav.svelte.js";
+  import { openArtist, openAlbum, openShow } from "../../nav.svelte.js";
+  import { episodeTrack } from "../../podcasts.svelte.js";
   import { notify } from "../../toast.svelte.js";
   import { coverAtLeast, releaseYear } from "../../utils.js";
   import TrackList from "../TrackList.svelte";
+  import EpisodeList from "../EpisodeList.svelte";
   import MediaCard from "../MediaCard.svelte";
   import Section from "../Section.svelte";
 
@@ -18,11 +19,18 @@
   let loadingMore = $state(false);
   let moreAvailable = $state(true);
 
+  const episodes = $derived.by(() => (results ? results.episodes.map((episode) => episodeTrack(episode)) : []));
+  const view = $derived(/** @type {import("../../nav.svelte.js").View} */ ({ type: "search", query }));
+  const found = $derived.by(() => {
+    if (!results) return 0;
+    const { tracks, artists, albums, shows, episodes } = results;
+    return tracks.length + artists.length + albums.length + shows.length + episodes.length;
+  });
+
   onMount(async () => {
     try {
       results = await api.searchAll(query);
       moreAvailable = results.tracks.length >= 10;
-      refreshLiked(results.tracks.map((t) => t.id));
     } catch (e) {
       error = `Search failed: ${e}`;
     }
@@ -35,7 +43,6 @@
       const more = await api.searchTracksPage(query, results.tracks.length);
       results.tracks.push(...more);
       moreAvailable = more.length >= 10;
-      refreshLiked(more.map((t) => t.id));
     } catch (e) {
       notify(`Couldn't load more results: ${e}`);
     } finally {
@@ -50,12 +57,12 @@
   <p class="error">{error}</p>
 {:else if !results}
   <p class="status">Searching...</p>
-{:else if results.tracks.length + results.artists.length + results.albums.length === 0}
+{:else if found === 0}
   <p class="status">Nothing found for "{query}".</p>
 {:else}
   {#if results.tracks.length > 0}
     <Section title="Songs">
-      <TrackList tracks={results.tracks} contextName={`Search: "${query}"`} />
+      <TrackList tracks={results.tracks} contextName={`Search: "${query}"`} contextView={view} primary />
       {#if moreAvailable}
         <button type="button" class="more" onclick={loadMore} disabled={loadingMore}>
           {loadingMore ? "Loading..." : "Show more"}
@@ -88,6 +95,18 @@
           onclick={() => openAlbum(album)}
         />
       {/each}
+    </Section>
+  {/if}
+  {#if results.shows.length > 0}
+    <Section title="Podcasts" grid>
+      {#each results.shows as show (show.id)}
+        <MediaCard image={coverAtLeast(show.images, 200)} title={show.name} subtitle="Podcast" onclick={() => openShow(show)} />
+      {/each}
+    </Section>
+  {/if}
+  {#if episodes.length > 0}
+    <Section title="Episodes">
+      <EpisodeList {episodes} contextName={`Search: "${query}"`} contextView={view} />
     </Section>
   {/if}
 {/if}

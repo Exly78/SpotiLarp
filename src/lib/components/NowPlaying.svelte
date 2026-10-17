@@ -1,22 +1,26 @@
 <script>
   import { untrack } from "svelte";
   import { fade } from "svelte/transition";
-  import { queue, next, hasNext, cycleRepeatMode, toggleShuffle } from "../queue.svelte.js";
+  import { queue, next, hasNext, cycleRepeatMode, toggleShuffle, shuffleMode, shuffleLabels } from "../queue.svelte.js";
   import {
     player,
     togglePlay,
     seekTo,
+    seekBy,
     setVolume,
     toggleMute,
     previousOrRestart,
   } from "../player.svelte.js";
   import { likedIds, likeBusy, refreshLiked, toggleLike } from "../likes.svelte.js";
-  import { navigate, openArtist, openAlbum } from "../nav.svelte.js";
+  import { navigate, openArtist, openAlbum, openShow } from "../nav.svelte.js";
+  import { isEpisodeUri } from "../podcasts.svelte.js";
   import { sleep } from "../sleep.svelte.js";
   import { formatTime } from "../utils.js";
   import Icon from "./Icon.svelte";
 
   const VOLUME_WHEEL_STEP = 5;
+  /** How far the podcast buttons skip. */
+  const EPISODE_SKIP_MS = 15_000;
 
   /** @type {{ queueOpen?: boolean, onToggleQueue?: () => void, onMiniMode?: () => void }} */
   let { queueOpen = false, onToggleQueue, onMiniMode } = $props();
@@ -28,6 +32,8 @@
 
   const trackId = $derived(player.track?.trackId ?? null);
   const album = $derived(queue.current && queue.current.id === trackId ? queue.current.album : null);
+  const episode = $derived(isEpisodeUri(player.track?.uri));
+  const show = $derived(episode && queue.current?.uri === player.track?.uri ? (queue.current?.show ?? null) : null);
   const sleepActive = $derived(sleep.endsAt !== null || sleep.endOfTrack);
   const durationMs = $derived(player.track?.durationMs ?? 0);
   const shownMs = $derived(dragMs ?? player.positionMs);
@@ -67,6 +73,8 @@
 
   /** @param {WheelEvent} evt */
   function onVolumeWheel(evt) {
+    // Ctrl+scroll zooms the window instead.
+    if (evt.ctrlKey) return;
     const step = evt.deltaY < 0 ? VOLUME_WHEEL_STEP : -VOLUME_WHEEL_STEP;
     setVolume(Math.min(100, Math.max(0, player.volume + step)));
   }
@@ -95,12 +103,16 @@
       <div class="track-name">
         {#if album?.id}
           <button type="button" class="link" onclick={() => album && openAlbum(album)}>{player.track?.name}</button>
+        {:else if show?.id}
+          <button type="button" class="link" onclick={() => openShow(show)}>{player.track?.name}</button>
         {:else}
           {player.track?.name ?? "Nothing playing"}
         {/if}
       </div>
       <div class="artists">
-        {#if player.track?.artistList?.length}
+        {#if show?.id}
+          <button type="button" class="link" onclick={() => openShow(show)}>{show.name}</button>
+        {:else if player.track?.artistList?.length}
           {#each player.track.artistList as artist, i}
             {#if i > 0},&nbsp;{/if}{#if artist.id}<button type="button" class="link" onclick={() => artist.id && openArtist({ id: artist.id, name: artist.name })}>{artist.name}</button>{:else}{artist.name}{/if}
           {/each}
@@ -125,16 +137,23 @@
 
   <div class="transport">
     <div class="buttons">
-      <button
-        type="button"
-        onclick={toggleShuffle}
-        class="icon-button toggle-button"
-        class:active={queue.shuffle}
-        aria-label={queue.shuffle ? "Disable shuffle" : "Enable shuffle"}
-        aria-pressed={queue.shuffle}
-      >
-        <Icon name="shuffle" size={17} />
-      </button>
+      {#if episode}
+        <button type="button" onclick={() => seekBy(-EPISODE_SKIP_MS)} class="icon-button" aria-label="Back 15 seconds" title="Back 15 seconds">
+          <Icon name="back-15" size={19} />
+        </button>
+      {:else}
+        <button
+          type="button"
+          onclick={toggleShuffle}
+          class="icon-button toggle-button"
+          class:active={queue.shuffle}
+          aria-label={shuffleLabels().action}
+          title={`${shuffleLabels().state} (click to change)`}
+          aria-pressed={queue.shuffle}
+        >
+          <Icon name={shuffleMode() === "smart" ? "shuffle-smart" : "shuffle"} size={17} />
+        </button>
+      {/if}
       <button onclick={previousOrRestart} disabled={!player.track} class="icon-button" aria-label="Previous">
         <Icon name="previous" size={18} />
       </button>
@@ -149,16 +168,22 @@
       <button onclick={next} disabled={!hasNext()} class="icon-button" aria-label="Next">
         <Icon name="next" size={18} />
       </button>
-      <button
-        type="button"
-        onclick={cycleRepeatMode}
-        class="icon-button toggle-button"
-        class:active={queue.repeatMode !== "off"}
-        aria-label={`Repeat: ${queue.repeatMode}`}
-        aria-pressed={queue.repeatMode !== "off"}
-      >
-        <Icon name={queue.repeatMode === "one" ? "repeat-one" : "repeat"} size={17} />
-      </button>
+      {#if episode}
+        <button type="button" onclick={() => seekBy(EPISODE_SKIP_MS)} class="icon-button" aria-label="Forward 15 seconds" title="Forward 15 seconds">
+          <Icon name="forward-15" size={19} />
+        </button>
+      {:else}
+        <button
+          type="button"
+          onclick={cycleRepeatMode}
+          class="icon-button toggle-button"
+          class:active={queue.repeatMode !== "off"}
+          aria-label={`Repeat: ${queue.repeatMode}`}
+          aria-pressed={queue.repeatMode !== "off"}
+        >
+          <Icon name={queue.repeatMode === "one" ? "repeat-one" : "repeat"} size={17} />
+        </button>
+      {/if}
     </div>
     <div class="seek-row">
       <span class="time">{formatTime(shownMs)}</span>
@@ -407,7 +432,7 @@ input[type="range"] {
   appearance: none;
   height: 4px;
   border-radius: var(--radius-pill);
-  background-color: #4d4d4d;
+  background-color: var(--track-bg);
   background-repeat: no-repeat;
   outline: none;
   cursor: pointer;
@@ -441,7 +466,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .track-base {
   width: 100%;
-  background: #4d4d4d;
+  background: var(--track-bg);
   z-index: 0;
 }
 .track-preview {

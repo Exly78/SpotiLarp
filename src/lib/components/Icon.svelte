@@ -207,4 +207,44 @@
     <circle cx="12" cy="12" r="2" />
     <circle cx="19" cy="12" r="2" />
   </svg>
+{:else if name === "radio"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="12" cy="12" r="2" fill="currentColor" />
+    <path d="M8.5 15.5a5 5 0 0 1 0-7" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M5.6 18.4a9 9 0 0 1 0-12.8" />
+    <path d="M18.4 5.6a9 9 0 0 1 0 12.8" />
+  </svg>
+{:else if name === "keyboard"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <line x1="6.5" y1="10" x2="6.5" y2="10" />
+    <line x1="10" y1="10" x2="10" y2="10" />
+    <line x1="13.5" y1="10" x2="13.5" y2="10" />
+    <line x1="17.5" y1="10" x2="17.5" y2="10" />
+    <line x1="8" y1="14" x2="16" y2="14" />
+  </svg>
+{:else if name === "shuffle-smart"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7h3.5c2 0 3.2 1 4.3 2.7l2.4 4.6c1.1 1.7 2.3 2.7 4.3 2.7H20" />
+    <path d="M3 17h3.5c1.4 0 2.4-0.5 3.2-1.3" />
+    <path d="M14.3 8.3c0.8-0.8 1.8-1.3 3.2-1.3H20" />
+    <polyline points="17,4 20,7 17,10" />
+    <polyline points="17,14 20,17 17,20" />
+    <path d="M6 0.6l0.8 1.6 1.6 0.8-1.6 0.8L6 5.4l-0.8-1.6L3.6 3l1.6-0.8z" fill="currentColor" stroke="none" />
+  </svg>
+{:else if name === "podcast"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+    <line x1="12" y1="17.5" x2="12" y2="21" />
+  </svg>
+{:else if name === "back-15" || name === "forward-15"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <g transform={name === "forward-15" ? "translate(24 0) scale(-1 1)" : undefined}>
+      <path d="M4.6 8.5A8.5 8.5 0 1 1 3.5 12" />
+      <polyline points="4,3.5 4.6,8.5 9.5,7.6" />
+    </g>
+    <text x="12.4" y="15.6" font-size="8" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">15</text>
+  </svg>
 {/if}

@@ -3,6 +3,7 @@
   import { fade } from "svelte/transition";
   import * as api from "../api.js";
   import { player, seekTo } from "../player.svelte.js";
+  import { isEpisodeUri } from "../podcasts.svelte.js";
 
   /** @type {{ visible?: boolean }} */
   let { visible = true } = $props();
@@ -35,10 +36,12 @@
     return idx;
   });
 
+  const episode = $derived(isEpisodeUri(player.track?.uri));
+
   $effect(() => {
     const track = player.track;
-    if (!track || !visible) return;
-    const key = `${track.name}::${track.artists}::${track.album}`;
+    if (!track || !visible || episode) return;
+    const key = `${track.trackId ?? ""}::${track.name}::${track.artists}::${track.album}`;
     if (key !== loadedFor) untrack(() => loadLyrics(track, key));
   });
 
@@ -54,8 +57,8 @@
     plain = null;
     instrumental = false;
     try {
-      const firstArtist = track.artists.split(",")[0]?.trim() ?? track.artists;
-      const result = await api.getLyrics(track.name, firstArtist, track.album, track.durationMs);
+      const firstArtist = track.artistList?.[0]?.name ?? track.artists.split(",")[0]?.trim() ?? track.artists;
+      const result = await api.getLyrics(track.trackId, track.name, firstArtist, track.album, track.durationMs);
       if (loadedFor !== key) return;
       if (result) {
         instrumental = result.instrumental;
@@ -113,6 +116,8 @@
 >
   {#if !player.track}
     <div class="empty-state" transition:fade={{ duration: 150 }}>Nothing playing.</div>
+  {:else if episode}
+    <div class="empty-state" transition:fade={{ duration: 150 }}>Podcast episodes don't have lyrics.</div>
   {:else if loading}
     <ul class="skeleton-list" transition:fade={{ duration: 150 }}>
       {#each { length: 8 } as _}

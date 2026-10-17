@@ -1,6 +1,8 @@
 <script module>
-  /** @type {Map<string, import("../../types.js").ArtistPage>} */
-  const cache = new Map();
+  import { BoundedCache } from "../../boundedCache.js";
+
+  /** @type {BoundedCache<string, import("../../types.js").ArtistPage>} */
+  const cache = new BoundedCache(10);
 </script>
 
 <script>
@@ -8,10 +10,9 @@
   import { fade } from "svelte/transition";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../../api.js";
-  import { queue, playFromList, toggleShuffle } from "../../queue.svelte.js";
+  import { queue, playFromList, toggleShuffle, shuffleMode, shuffleLabels } from "../../queue.svelte.js";
   import { player, togglePlay } from "../../player.svelte.js";
-  import { refreshLiked } from "../../likes.svelte.js";
-  import { openAlbum, openArtist, openDiscography, openPlaylistCard } from "../../nav.svelte.js";
+  import { openAlbum, openArtist, openDiscography, openPlaylistCard, openRadio } from "../../nav.svelte.js";
   import { notify } from "../../toast.svelte.js";
   import { dominantColor, tintFromHex } from "../../colors.js";
   import { coverAtLeast, formatCount, htmlToText, releaseType, releaseYear } from "../../utils.js";
@@ -48,6 +49,7 @@
   let moreWrap = $state();
 
   const artistName = $derived(page?.name || name);
+  const view = $derived(/** @type {import("../../nav.svelte.js").View} */ ({ type: "artist", id, name: artistName }));
   const avatar = $derived(coverAtLeast(page?.images, 300));
   const banner = $derived(coverAtLeast(page?.header_images, 1600));
   const metadataTint = $derived(page?.color ? tintFromHex(page.color) : "");
@@ -84,7 +86,6 @@
         cache.set(id, result);
         if (result.following != null) following = result.following;
         else api.isFollowingArtist(id).then((f) => (following = f)).catch(() => {});
-        refreshLiked(result.top_tracks.map((track) => track.id));
       })
       .catch((e) => {
         if (page) notify(`Couldn't refresh ${artistName}: ${e}`);
@@ -106,8 +107,7 @@
       return;
     }
     if (topTracks.length === 0) return;
-    const start = queue.shuffle ? Math.floor(Math.random() * topTracks.length) : 0;
-    playFromList(topTracks, start, artistName);
+    playFromList(topTracks, -1, artistName, view);
   }
 
   async function toggleFollow() {
@@ -198,10 +198,11 @@
         class="icon-button"
         class:active={queue.shuffle}
         onclick={toggleShuffle}
-        aria-label={queue.shuffle ? "Disable shuffle" : "Enable shuffle"}
+        aria-label={shuffleLabels().action}
+        title={`${shuffleLabels().state} (click to change)`}
         aria-pressed={queue.shuffle}
       >
-        <Icon name="shuffle" size={28} />
+        <Icon name={shuffleMode() === "smart" ? "shuffle-smart" : "shuffle"} size={28} />
       </button>
       <button type="button" class="follow-button" class:following disabled={followBusy} onclick={toggleFollow}>
         {following ? "Following" : "Follow"}
@@ -221,6 +222,9 @@
           <div class="menu" role="menu" transition:fade={{ duration: 100 }}>
             <button type="button" role="menuitem" onclick={() => fromMenu(toggleFollow)}>
               {following ? "Unfollow" : "Follow"}
+            </button>
+            <button type="button" role="menuitem" onclick={() => fromMenu(() => openRadio(`spotify:artist:${id}`, artistName, avatar))}>
+              Go to artist radio
             </button>
             <div class="divider"></div>
             <button type="button" role="menuitem" onclick={() => fromMenu(copyLink)}>Copy link to artist</button>
@@ -256,6 +260,7 @@
             tracks={showAllPopular ? topTracks : topTracks.slice(0, POPULAR_PREVIEW)}
             allTracks={topTracks}
             contextName={artistName}
+            contextView={view}
             showHeader={false}
             showArtists={false}
             showAlbum={false}
@@ -503,7 +508,7 @@ h1.very-long {
 }
 .follow-button {
   padding: 0.45em 1.1em;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid color-mix(in srgb, var(--text) 50%, transparent);
   border-radius: var(--radius-pill);
   background: none;
   color: var(--text);
@@ -549,7 +554,7 @@ h1.very-long {
   cursor: pointer;
 }
 .menu button:hover {
-  background: #3e3e3e;
+  background: var(--highlight-strong);
 }
 .divider {
   height: 1px;
@@ -599,11 +604,11 @@ h2 {
   transition: background-color var(--transition);
 }
 .chip:hover {
-  background: #333;
+  background: var(--control-hover);
 }
 .chip.selected {
   background: var(--text);
-  color: #000;
+  color: var(--main-bg);
 }
 
 .error {

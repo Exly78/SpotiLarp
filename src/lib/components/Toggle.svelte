@@ -16,7 +16,7 @@
   padding: 0;
   border: none;
   border-radius: var(--radius-pill);
-  background: #535353;
+  background: var(--toggle-off);
   cursor: pointer;
   transition: background-color var(--transition);
 }

@@ -15,11 +15,15 @@
   import { drag, startTrackDrag, endDrag, insertionIndex } from "../drag.svelte.js";
   import { openTrackMenu } from "../contextMenu.svelte.js";
   import { smallestCover } from "../utils.js";
+  import { navigate } from "../nav.svelte.js";
+  import RecentList from "./RecentList.svelte";
 
   /** @typedef {import("../types.js").Track} Track */
 
   /** @type {{ onClose: () => void }} */
   let { onClose } = $props();
+
+  let tab = $state(/** @type {"queue"|"recent"} */ ("queue"));
 
   const UPCOMING_LIMIT = 100;
 
@@ -92,17 +96,34 @@
   ondrop={onPanelDrop}
 >
   <div class="panel-header">
-    <span class="title">Queue</span>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" class="tab" class:selected={tab === "queue"} aria-selected={tab === "queue"} onclick={() => (tab = "queue")}>
+        Queue
+      </button>
+      <button type="button" role="tab" class="tab" class:selected={tab === "recent"} aria-selected={tab === "recent"} onclick={() => (tab = "recent")}>
+        Recent
+      </button>
+    </div>
     <button type="button" class="icon-button" onclick={onClose} aria-label="Close queue">
       <Icon name="close" size={16} />
     </button>
   </div>
 
-  {#if !queue.current}
+  {#if tab === "recent"}
+    <section>
+      <RecentList />
+    </section>
+  {:else if !queue.current}
     <div class="empty">Nothing in the queue yet. Right-click a song and pick "Add to queue".</div>
   {:else}
     <section>
       <h3>Now playing</h3>
+      {#if queue.contextView && queue.contextName}
+        {@const view = queue.contextView}
+        <div class="playing-from">
+          Playing from <button type="button" class="text-button context-link" onclick={() => navigate(view)}>{queue.contextName}</button>
+        </div>
+      {/if}
       <div class="row static" role="presentation" oncontextmenu={(e) => queue.current && openTrackMenu(e, queue.current)}>
         {@render row(queue.current, !!player.track)}
       </div>
@@ -185,11 +206,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.5em;
-}
-.title {
-  font-size: var(--fs-md);
-  font-weight: var(--fw-bold);
-  color: var(--text);
 }
 h3 {
   margin: 0 0 0.5em;
@@ -328,6 +344,36 @@ h3 {
 .text-button:hover {
   color: var(--text);
   text-decoration: underline;
+}
+.tabs {
+  display: flex;
+  gap: 1em;
+}
+.tab {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  transition: color var(--transition);
+}
+.tab:hover,
+.tab.selected {
+  color: var(--text);
+}
+.playing-from {
+  margin: -0.3em 0 0.4em;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-link {
+  color: var(--text);
 }
 .more {
   padding: 0.5em;

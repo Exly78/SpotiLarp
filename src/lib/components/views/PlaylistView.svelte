@@ -1,9 +1,27 @@
 <script module>
-  /** @type {Map<string, import("../../types.js").Track[]>} */
-  const cache = new Map();
+  import { BoundedCache } from "../../boundedCache.js";
+
+  /**
+   * Playlists can be thousands of songs, so only the last few opened are kept.
+   * @type {BoundedCache<string, import("../../types.js").Track[]>}
+   */
+  const cache = new BoundedCache(6);
 
   export function clearPlaylistCache() {
     cache.clear();
+  }
+
+  /** @param {string} playlistId */
+  export function cachedPlaylistTracks(playlistId) {
+    return cache.get(playlistId);
+  }
+
+  /**
+   * @param {string} playlistId
+   * @param {import("../../types.js").Track[]} tracks
+   */
+  export function cachePlaylistTracks(playlistId, tracks) {
+    cache.set(playlistId, tracks);
   }
 </script>
 
@@ -11,14 +29,18 @@
   import { onMount, untrack } from "svelte";
   import { fade } from "svelte/transition";
   import * as api from "../../api.js";
-  import { queue, playFromList } from "../../queue.svelte.js";
-  import { refreshLiked, markLiked } from "../../likes.svelte.js";
-  import { isOwned, adjustTrackCount } from "../../library.svelte.js";
+  import { playFromList, addManyToQueue } from "../../queue.svelte.js";
+  import { markLiked, likeTracks } from "../../likes.svelte.js";
+  import { isOwned, adjustTrackCount, updatePlaylistDetails } from "../../library.svelte.js";
+  import { openRadio } from "../../nav.svelte.js";
   import { notify } from "../../toast.svelte.js";
-  import { formatDuration, coverAtLeast } from "../../utils.js";
+  import { formatDuration, coverAtLeast, htmlToText } from "../../utils.js";
   import TrackList from "../TrackList.svelte";
   import PageHeader from "../PageHeader.svelte";
   import PlayButton from "../PlayButton.svelte";
+  import ShuffleButton from "../ShuffleButton.svelte";
+  import MoreMenu from "../MoreMenu.svelte";
+  import EditPlaylistDialog from "../EditPlaylistDialog.svelte";
 
   /** @type {{ playlist: import("../../types.js").Playlist }} */
   let { playlist } = $props();
@@ -41,6 +63,8 @@
   let error = $state("");
   let filter = $state("");
   let sort = $state("custom");
+  let refreshing = $state(false);
+  let editing = $state(false);
 
   const owned = $derived(isOwned(playlist));
   const sorted = $derived.by(() => {
@@ -58,6 +82,8 @@
     );
   });
   const totalMs = $derived(tracks.reduce((sum, t) => sum + t.duration_ms, 0));
+  const view = $derived(/** @type {import("../../nav.svelte.js").View} */ ({ type: "playlist", playlist }));
+  const link = $derived(playlist.isLikedSongs ? "" : `https://open.spotify.com/playlist/${playlist.id}`);
   const unreadable = $derived(!loading && !error && tracks.length === 0 && !owned && playlist.track_count.total > 0);
 
   onMount(load);
@@ -71,19 +97,41 @@
       cache.set(playlist.id, result);
       const ids = result.map((t) => t.id);
       if (playlist.isLikedSongs) markLiked(ids);
-      else refreshLiked(ids);
     } catch (e) {
       if (tracks.length === 0) error = `Failed to load playlist: ${e}`;
       else notify(`Couldn't refresh "${playlist.name}": ${e}`);
     } finally {
       loading = false;
+      refreshing = false;
     }
+  }
+
+  // Picks up changes made in other Spotify apps; the songs stay on screen meanwhile.
+  function refresh() {
+    if (refreshing) return;
+    refreshing = true;
+    load();
   }
 
   function playAll() {
     if (visibleTracks.length === 0) return;
-    const start = queue.shuffle ? Math.floor(Math.random() * visibleTracks.length) : 0;
-    playFromList(visibleTracks, start, playlist.name);
+    playFromList(visibleTracks, -1, playlist.name, view);
+  }
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      notify("Link copied");
+    } catch (e) {
+      notify(`Couldn't copy the link: ${e}`);
+    }
+  }
+
+  /** @param {{ name: string, description: string, public: boolean }} details */
+  async function saveDetails(details) {
+    await updatePlaylistDetails(playlist, details);
+    editing = false;
+    notify("Playlist details saved");
   }
 
   const canReorder = $derived(owned && !playlist.isLikedSongs && sort === "custom" && !filter.trim());
@@ -115,17 +163,45 @@
     }
   }
 
-  /** @param {Track} track */
-  async function removeTrack(track) {
+  /** @param {Track[]} removed every copy of each goes, as Spotify does */
+  async function removeTracks(removed) {
+    const uris = [...new Set(removed.map((t) => t.uri))];
+    if (uris.length === 0) return;
     try {
-      await api.removeFromPlaylist(playlist.id, track.uri);
+      await api.removeFromPlaylist(playlist.id, uris);
       const before = tracks.length;
-      tracks = tracks.filter((t) => t.uri !== track.uri);
+      tracks = tracks.filter((t) => !uris.includes(t.uri));
       cache.set(playlist.id, tracks);
       adjustTrackCount(playlist.id, tracks.length - before);
-      notify(`Removed from ${playlist.name}`);
+      notify(uris.length === 1 ? `Removed from ${playlist.name}` : `Removed ${uris.length} songs from ${playlist.name}`);
     } catch (e) {
-      notify(`Couldn't remove it from the playlist: ${e}`);
+      notify(`Couldn't remove from the playlist: ${e}`);
+    }
+  }
+
+  /**
+   * Ctrl+V with song links on the clipboard. Songs already here are skipped.
+   * @param {string[]} uris
+   */
+  async function paste(uris) {
+    const have = new Set(tracks.map((t) => t.uri));
+    const fresh = [...new Set(uris)].filter((uri) => !have.has(uri));
+    const skipped = uris.length - fresh.length;
+    if (fresh.length === 0) {
+      notify(uris.length === 1 ? "That song is already here" : "Those songs are already here");
+      return;
+    }
+    try {
+      if (playlist.isLikedSongs) {
+        await likeTracks(fresh.map((uri) => uri.split(":")[2]));
+      } else {
+        await api.addToPlaylist(playlist.id, fresh);
+        adjustTrackCount(playlist.id, fresh.length);
+        notify(`Added ${fresh.length === 1 ? "1 song" : `${fresh.length} songs`} to ${playlist.name}${skipped > 0 ? ` (${skipped} already here)` : ""}`);
+      }
+      load();
+    } catch (e) {
+      notify(`Couldn't add the songs: ${e}`);
     }
   }
 </script>
@@ -137,6 +213,7 @@
   title={playlist.name}
 >
   {#snippet meta()}
+    {#if htmlToText(playlist.description)}<span class="description">{htmlToText(playlist.description)}</span>{/if}
     {#if playlist.owner?.display_name}<strong>{playlist.owner.display_name}</strong> · {/if}
     {#if !loading && tracks.length > 0}
       {tracks.length} {tracks.length === 1 ? "song" : "songs"} · {formatDuration(totalMs)}
@@ -144,6 +221,22 @@
   {/snippet}
   {#snippet actions()}
     <PlayButton onclick={playAll} disabled={loading || visibleTracks.length === 0} label={`Play ${playlist.name}`} />
+    <ShuffleButton />
+    <MoreMenu
+      label={`More options for ${playlist.name}`}
+      items={[
+        { label: "Add to queue", onclick: () => addManyToQueue(visibleTracks), disabled: visibleTracks.length === 0 },
+        !playlist.isLikedSongs && {
+          label: "Go to playlist radio",
+          onclick: () => openRadio(`spotify:playlist:${playlist.id}`, playlist.name, coverAtLeast(playlist.images, 300)),
+        },
+        null,
+        { label: refreshing ? "Refreshing..." : "Refresh", onclick: refresh, disabled: refreshing || loading },
+        owned && !playlist.isLikedSongs && { label: "Edit details", onclick: () => (editing = true) },
+        null,
+        !!link && { label: "Copy link to playlist", onclick: copyLink },
+      ]}
+    />
     {#if tracks.length > 1}
       <div class="tools">
         <input
@@ -193,13 +286,25 @@
   <TrackList
     tracks={visibleTracks}
     contextName={playlist.name}
+    contextView={view}
+    primary
     showDateAdded
-    onRemove={owned && !playlist.isLikedSongs ? removeTrack : undefined}
+    onRemove={owned && !playlist.isLikedSongs ? removeTracks : undefined}
     onReorder={canReorder ? reorder : undefined}
+    onPaste={owned ? paste : undefined}
   />
 {/if}
 
+{#if editing}
+  <EditPlaylistDialog {playlist} onSave={saveDetails} onCancel={() => (editing = false)} />
+{/if}
+
 <style>
+.description {
+  display: block;
+  margin-bottom: 0.3em;
+  color: var(--text-muted);
+}
 .tools {
   display: flex;
   align-items: center;

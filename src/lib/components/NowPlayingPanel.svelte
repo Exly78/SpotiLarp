@@ -1,3 +1,13 @@
+<script module>
+  import { BoundedCache } from "../boundedCache.js";
+
+  // Artists already looked up, and whether you follow them, for the songs that come round again.
+  /** @type {BoundedCache<string, import("../types.js").ArtistDetails>} */
+  const artists = new BoundedCache(50);
+  /** @type {BoundedCache<string, boolean>} */
+  const followed = new BoundedCache(200);
+</script>
+
 <script>
   import { untrack } from "svelte";
   import { fade } from "svelte/transition";
@@ -42,7 +52,8 @@
     followError = "";
 
     try {
-      const details = await api.getArtist(id);
+      const details = artists.get(id) ?? (await api.getArtist(id));
+      artists.set(id, details);
       if (artistId === id) artistDetails = details;
     } catch (e) {
       console.error("Failed to load artist info:", e);
@@ -51,11 +62,13 @@
       if (artistId === id) artistLoading = false;
     }
     try {
-      const isFollowing = await api.isFollowingArtist(id);
+      const isFollowing = followed.get(id) ?? (await api.isFollowingArtist(id));
+      followed.set(id, isFollowing);
       if (artistId === id) following = isFollowing;
     } catch (e) {
       console.error("Failed to load follow status:", e);
-      if (artistId === id) followError = String(e);
+      // Spotify slowing things down isn't worth a message under the artist.
+      if (artistId === id && !api.isRateLimited(e)) followError = String(e);
     }
   }
 
@@ -68,6 +81,7 @@
     try {
       if (next) await api.followArtist(id);
       else await api.unfollowArtist(id);
+      followed.set(id, next);
       if (artistId === id) following = next;
     } catch (e) {
       console.error("Failed to update follow state:", e);

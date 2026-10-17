@@ -35,6 +35,22 @@ export function releaseYear(date) {
   return date ? date.slice(0, 4) : "";
 }
 
+const dayFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const datedFormatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+/**
+ * "Oct 14" this year, "Oct 14, 2025" before. Spotify sometimes knows only the
+ * year (or month), which shows as the year.
+ * @param {string|null|undefined} date like "2026-10-14"
+ */
+export function releaseDay(date) {
+  if (!date) return "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date.slice(0, 4);
+  const [year, month, day] = date.split("-").map(Number);
+  const formatter = year === new Date().getFullYear() ? dayFormatter : datedFormatter;
+  return formatter.format(new Date(year, month - 1, day));
+}
+
 const countFormatter = new Intl.NumberFormat();
 
 /** @param {number} count */

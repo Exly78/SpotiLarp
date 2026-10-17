@@ -5,6 +5,8 @@
  *   | { type: "discography", id: string, name: string, group: import("./types.js").ReleaseGroup }
  *   | { type: "album", id: string, name?: string }
  *   | { type: "search", query: string }
+ *   | { type: "radio", seed: string, name: string, image?: string|null }
+ *   | { type: "show", id: string, name?: string }
  *   | { type: "stats" }
  *   | { type: "local" }
  *   | { type: "settings" }} View
@@ -23,9 +25,12 @@ export function viewKey(view) {
     case "artist":
     case "album":
     case "discography":
+    case "show":
       return `${view.type}:${view.id}`;
     case "search":
       return `search:${view.query}`;
+    case "radio":
+      return `radio:${view.seed}`;
     default:
       return view.type;
   }
@@ -72,6 +77,21 @@ export function openArtist(artist) {
 /** @param {{ id?: string, name?: string }} album */
 export function openAlbum(album) {
   if (album.id) navigate({ type: "album", id: album.id, name: album.name });
+}
+
+/** @param {{ id?: string, name?: string }|null|undefined} show a podcast */
+export function openShow(show) {
+  if (show?.id) navigate({ type: "show", id: show.id, name: show.name });
+}
+
+/**
+ * Spotify's radio for a song, playlist, album or artist.
+ * @param {string} seed its URI, like `spotify:track:<id>`
+ * @param {string} name
+ * @param {string|null} [image]
+ */
+export function openRadio(seed, name, image = null) {
+  navigate({ type: "radio", seed, name, image });
 }
 
 /**

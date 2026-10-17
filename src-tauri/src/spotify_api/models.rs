@@ -73,6 +73,10 @@ pub struct SearchResponse {
     pub tracks: Option<Page<Track>>,
     pub artists: Option<Page<ArtistDetails>>,
     pub albums: Option<Page<Album>>,
+    #[serde(default)]
+    pub shows: Option<Page<Show>>,
+    #[serde(default)]
+    pub episodes: Option<Page<Episode>>,
 }
 
 #[derive(Serialize)]
@@ -80,6 +84,8 @@ pub struct SearchResults {
     pub tracks: Vec<Track>,
     pub artists: Vec<ArtistDetails>,
     pub albums: Vec<Album>,
+    pub shows: Vec<Show>,
+    pub episodes: Vec<Episode>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -257,6 +263,10 @@ pub struct Playlist {
     pub owner: Option<PlaylistOwner>,
     #[serde(default)]
     pub collaborative: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub public: Option<bool>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -308,6 +318,60 @@ pub struct SavedAlbumItem {
     pub album: Option<Album>,
 }
 
+/// A podcast. (Spotify stopped sending apps its publisher.)
+#[derive(Clone, Default, Deserialize, Serialize)]
+pub struct Show {
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub id: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub name: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub images: Vec<Image>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub description: String,
+    #[serde(default)]
+    pub total_episodes: Option<u32>,
+    #[serde(default)]
+    pub explicit: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct Episode {
+    pub id: String,
+    pub name: String,
+    pub uri: String,
+    #[serde(default)]
+    pub duration_ms: u32,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub description: String,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub images: Vec<Image>,
+    #[serde(default)]
+    pub release_date: Option<String>,
+    #[serde(default)]
+    pub explicit: bool,
+    #[serde(default = "playable")]
+    pub is_playable: bool,
+    /// Only when asking about one episode, not in a show's list or a search.
+    #[serde(default)]
+    pub show: Option<Show>,
+}
+
+fn playable() -> bool {
+    true
+}
+
+#[derive(Serialize)]
+pub struct EpisodePage {
+    pub items: Vec<Episode>,
+    pub total: u32,
+}
+
+#[derive(Deserialize)]
+pub struct SavedShowItem {
+    pub show: Option<Show>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,6 +396,16 @@ mod tests {
         assert_eq!(page.items.len(), 3);
         assert!(page.items[0].0.is_none() && page.items[1].0.is_none());
         assert!(page.items[2].0.as_ref().is_some_and(|item| item.item.is_some()));
+    }
+
+    #[test]
+    fn show_episodes_skip_unavailable_ones() {
+        let json = r#"{"total":3,"items":[null,{"id":"e1","name":"One","uri":"spotify:episode:e1","duration_ms":60000,"description":null,"images":[],"release_date":"2026-01-02"},{"name":"broken"}]}"#;
+        let page: Page<Episode> = serde_json::from_str(json).unwrap();
+        assert_eq!(page.total, 3);
+        assert_eq!(page.items.len(), 1);
+        assert!(page.items[0].is_playable && page.items[0].show.is_none());
+        assert_eq!(page.items[0].description, "");
     }
 
     #[test]

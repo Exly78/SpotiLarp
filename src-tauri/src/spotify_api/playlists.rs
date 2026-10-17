@@ -5,6 +5,7 @@ use librespot_core::SpotifyId;
 use librespot_protocol::playlist4_external::{op, Add, ChangeInfo, Delta, Item, ListChanges, Op, Rem, SelectedListContent};
 use protobuf::Message;
 use reqwest::Method;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::client::SpotifyClient;
@@ -18,9 +19,92 @@ const SESSION_PLAYLIST_PAGE_SIZE: u32 = 100;
 const MAX_SESSION_PLAYLIST_ITEMS: u32 = 10_000;
 const SAVED_TRACKS_PAGE_SIZE: u32 = 50;
 const ADD_ITEMS_CHUNK_SIZE: usize = 100;
+const ROOTLIST_PAGE_SIZE: usize = 500;
+const MAX_ROOTLIST_PAGES: usize = 20;
+
+/// One row of the library's playlist order, folders included. The Web API
+/// has no folders; the Spotify apps read them from the "rootlist".
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RootlistEntry {
+    Playlist { id: String },
+    FolderStart { id: String, name: String },
+    FolderEnd,
+}
+
+pub async fn rootlist(session: &Session) -> Result<Vec<RootlistEntry>, String> {
+    let mut uris = Vec::new();
+    for page in 0..MAX_ROOTLIST_PAGES {
+        let from = page * ROOTLIST_PAGE_SIZE;
+        let bytes = session
+            .spclient()
+            .get_rootlist(from, Some(ROOTLIST_PAGE_SIZE))
+            .await
+            .map_err(|e| format!("Couldn't read your playlist folders: {e}"))?;
+        let list = SelectedListContent::parse_from_bytes(&bytes).map_err(|e| format!("Couldn't read your playlist folders: {e}"))?;
+        let count = list.contents.items.len();
+        uris.extend(list.contents.items.iter().map(|item| item.uri().to_string()));
+        let total = if list.has_length() { list.length() as usize } else { 0 };
+        if count < ROOTLIST_PAGE_SIZE || from + count >= total {
+            break;
+        }
+    }
+    Ok(parse_rootlist(&uris))
+}
+
+fn parse_rootlist(uris: &[String]) -> Vec<RootlistEntry> {
+    let mut entries = Vec::new();
+    let mut depth = 0usize;
+    for uri in uris {
+        if let Some(rest) = uri.strip_prefix("spotify:start-group:") {
+            let (id, name) = rest.split_once(':').unwrap_or((rest, ""));
+            entries.push(RootlistEntry::FolderStart { id: id.to_string(), name: decode_folder_name(name) });
+            depth += 1;
+        } else if uri.starts_with("spotify:end-group:") {
+            if depth > 0 {
+                entries.push(RootlistEntry::FolderEnd);
+                depth -= 1;
+            }
+        } else if let Some(id) = uri.strip_prefix("spotify:playlist:") {
+            entries.push(RootlistEntry::Playlist { id: id.to_string() });
+        }
+    }
+    // A folder Spotify never closed still closes.
+    entries.extend(std::iter::repeat_n(RootlistEntry::FolderEnd, depth));
+    entries
+}
+
+/// Folder names arrive percent-encoded, with `+` for a space.
+fn decode_folder_name(encoded: &str) -> String {
+    let bytes = encoded.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |at: usize| bytes.get(at).and_then(|byte| (*byte as char).to_digit(16));
+        match (bytes[i], hex(i + 1), hex(i + 2)) {
+            (b'+', _, _) => {
+                out.push(b' ');
+                i += 1;
+            }
+            (b'%', Some(high), Some(low)) => {
+                out.push((high << 4 | low) as u8);
+                i += 3;
+            }
+            (byte, _, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
 
 pub async fn get_playlists(client: &mut SpotifyClient) -> Result<Vec<Playlist>, String> {
     client.get_all_pages("/me/playlists", PLAYLISTS_PAGE_SIZE).await
+}
+
+pub async fn get_playlist(client: &mut SpotifyClient, playlist_id: &str) -> Result<Playlist, String> {
+    client.get_json(&format!("/playlists/{playlist_id}"), &[]).await
 }
 
 pub async fn get_playlist_tracks(
@@ -181,11 +265,13 @@ pub async fn add_tracks(client: &mut SpotifyClient, playlist_id: &str, uris: &[S
     Ok(())
 }
 
-pub async fn remove_track(client: &mut SpotifyClient, playlist_id: &str, uri: &str) -> Result<(), String> {
+/// Removes every copy of each song.
+pub async fn remove_tracks(client: &mut SpotifyClient, playlist_id: &str, uris: &[String]) -> Result<(), String> {
     let path = format!("/playlists/{playlist_id}/items");
-    let _: Value = client
-        .send_json(Method::DELETE, &path, &json!({ "items": [{ "uri": uri }] }))
-        .await?;
+    for chunk in uris.chunks(ADD_ITEMS_CHUNK_SIZE) {
+        let items: Vec<Value> = chunk.iter().map(|uri| json!({ "uri": uri })).collect();
+        let _: Value = client.send_json(Method::DELETE, &path, &json!({ "items": items })).await?;
+    }
     Ok(())
 }
 
@@ -198,6 +284,22 @@ pub async fn create_playlist(client: &mut SpotifyClient, name: &str) -> Result<P
 pub async fn rename_playlist(client: &mut SpotifyClient, playlist_id: &str, name: &str) -> Result<(), String> {
     let path = format!("/playlists/{playlist_id}");
     client.send_json(Method::PUT, &path, &json!({ "name": name })).await
+}
+
+/// Spotify won't let apps clear a description, so an empty one leaves it as it was.
+pub async fn update_details(
+    client: &mut SpotifyClient,
+    playlist_id: &str,
+    name: &str,
+    description: &str,
+    public: bool,
+) -> Result<(), String> {
+    let path = format!("/playlists/{playlist_id}");
+    let mut body = json!({ "name": name, "public": public });
+    if !description.is_empty() {
+        body["description"] = json!(description);
+    }
+    client.send_json(Method::PUT, &path, &body).await
 }
 
 pub async fn remove_playlist(client: &mut SpotifyClient, playlist_id: &str) -> Result<(), String> {
@@ -214,4 +316,49 @@ pub async fn move_track(
     let body = json!({ "range_start": from, "insert_before": insert_before, "range_length": 1 });
     let _: Value = client.send_json(Method::PUT, &path, &body).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rootlists_turn_into_folders() {
+        let uris: Vec<String> = [
+            "spotify:playlist:a",
+            "spotify:start-group:f1:Road+Trip%20%F0%9F%9A%97",
+            "spotify:playlist:b",
+            "spotify:start-group:f2:Inner",
+            "spotify:playlist:c",
+            "spotify:end-group:f2",
+            "spotify:end-group:f1",
+            "spotify:end-group:stray",
+            "spotify:start-group:f3:Unclosed",
+            "spotify:playlist:d",
+        ]
+        .map(String::from)
+        .to_vec();
+        use RootlistEntry::*;
+        assert_eq!(
+            parse_rootlist(&uris),
+            vec![
+                Playlist { id: "a".into() },
+                FolderStart { id: "f1".into(), name: "Road Trip 🚗".into() },
+                Playlist { id: "b".into() },
+                FolderStart { id: "f2".into(), name: "Inner".into() },
+                Playlist { id: "c".into() },
+                FolderEnd,
+                FolderEnd,
+                FolderStart { id: "f3".into(), name: "Unclosed".into() },
+                Playlist { id: "d".into() },
+                FolderEnd,
+            ]
+        );
+    }
+
+    #[test]
+    fn broken_escapes_stay_as_they_are() {
+        assert_eq!(decode_folder_name("100%"), "100%");
+        assert_eq!(decode_folder_name("%zz%é"), "%zz%é");
+    }
 }

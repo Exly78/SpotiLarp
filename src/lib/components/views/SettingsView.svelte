@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import * as api from "../../api.js";
   import { restartAfterPlayerRebuild } from "../../player.svelte.js";
   import { queue, toggleAutoplay } from "../../queue.svelte.js";
@@ -8,6 +8,11 @@
   import { addLocalFolder, removeLocalFolder } from "../../localFiles.svelte.js";
   import Icon from "../Icon.svelte";
   import Toggle from "../Toggle.svelte";
+  import { SHORTCUTS } from "../../keys.js";
+  import { history, clearHistory } from "../../history.svelte.js";
+  import { episodes, clearEpisodeProgress } from "../../podcasts.svelte.js";
+  import { zoom, setZoom, ZOOM_LEVELS } from "../../zoom.svelte.js";
+  import { themes, loadThemes, selectTheme, applyTheme } from "../../themes.svelte.js";
 
   const CACHE_SIZES = [
     { mb: 0, label: "Off" },
@@ -18,18 +23,6 @@
     { mb: 10240, label: "10 GB" },
   ];
   const SLEEP_OPTIONS = [15, 30, 45, 60, 90];
-  const SHORTCUTS = [
-    ["Space", "Play / pause"],
-    ["Ctrl+Right / Ctrl+Left", "Next / previous song"],
-    ["Shift+Right / Shift+Left", "Skip forward / back 5 seconds"],
-    ["Ctrl+Up / Ctrl+Down", "Volume up / down"],
-    ["M", "Mute / unmute"],
-    ["Ctrl+S", "Shuffle"],
-    ["Ctrl+R", "Repeat"],
-    ["Ctrl+F or /", "Search"],
-    ["Alt+Left / Alt+Right", "Back / forward"],
-    ["Media keys", "Play, pause, next, previous (also from the Windows media overlay)"],
-  ];
   const EQ_BANDS = ["32", "64", "125", "250", "500", "1K", "2K", "4K", "8K", "16K"];
   const EQ_MAX_DB = 12;
   /** @type {Record<string, { label: string, gains: number[] }>} */
@@ -59,6 +52,36 @@
   let devices = $state([]);
   /** @type {number[]} */
   let gains = $state([]);
+  let query = $state("");
+  let nothingMatches = $state(false);
+  /** @type {HTMLDivElement|undefined} */
+  let sectionsEl = $state();
+
+  // Narrows the page to the rows mentioning what's typed; a section whose
+  // title matches keeps all its rows.
+  $effect(() => {
+    const words = query.trim().toLowerCase();
+    const root = sectionsEl;
+    if (!root) return;
+    tick().then(() => {
+      let anyShown = false;
+      for (const section of root.querySelectorAll("section")) {
+        const title = section.querySelector("h2")?.textContent?.toLowerCase() ?? "";
+        const titleMatches = !words || title.includes(words);
+        let rowsShown = 0;
+        for (const item of section.querySelectorAll(":scope > :not(h2)")) {
+          const el = /** @type {HTMLElement} */ (item);
+          const shown = titleMatches || (el.textContent ?? "").toLowerCase().includes(words);
+          el.style.display = shown ? "" : "none";
+          if (shown) rowsShown++;
+        }
+        const sectionShown = titleMatches || rowsShown > 0;
+        /** @type {HTMLElement} */ (section).style.display = sectionShown ? "" : "none";
+        anyShown ||= sectionShown;
+      }
+      nothingMatches = !anyShown;
+    });
+  });
 
   const remainingLabel = $derived.by(() => {
     if (sleep.endOfTrack) return "Stops when this song ends";
@@ -67,7 +90,42 @@
     return `Pausing in ${minutes} min`;
   });
 
+  /** @type {{ onChangeClientId?: () => void }} */
+  let { onChangeClientId } = $props();
+
+  /** @type {string|null} */
+  let clientId = $state(null);
+
+  let importingThemes = $state(false);
+  const currentTheme = $derived(themes.list.find((t) => t.id === themes.prefs.id));
+  const ownThemes = $derived(themes.list.filter((t) => t.source === "own"));
+  const spicetifyThemes = $derived(themes.list.filter((t) => t.source === "spicetify"));
+
+  async function addThemes() {
+    const folder = await api.pickFolder().catch(() => null);
+    if (!folder) return;
+    importingThemes = true;
+    try {
+      const names = await api.importThemes(folder);
+      await loadThemes();
+      notify(names.length === 1 ? `Added "${names[0]}"` : `Added ${names.length} themes`);
+      if (names.length === 1) await selectTheme(`own:${names[0]}`);
+    } catch (e) {
+      notify(`Couldn't add themes: ${e}`);
+    } finally {
+      importingThemes = false;
+    }
+  }
+
+  async function reloadThemes() {
+    await loadThemes();
+    await applyTheme();
+    notify("Themes reloaded");
+  }
+
   onMount(async () => {
+    loadThemes();
+    api.getClientId().then((id) => (clientId = id)).catch(() => {});
     settings = await api.getSettings();
     gains = [...settings.eq_gains];
     refreshDevices();
@@ -180,6 +238,133 @@
 {#if !settings}
   <p class="hint">Loading...</p>
 {:else}
+  <input
+    type="search"
+    class="settings-search"
+    placeholder="Search settings"
+    bind:value={query}
+    spellcheck="false"
+    aria-label="Search settings"
+  />
+  {#if nothingMatches}
+    <p class="hint">No settings match "{query.trim()}".</p>
+  {/if}
+  <div bind:this={sectionsEl}>
+  <section>
+    <h2>Appearance</h2>
+    <div class="row">
+      <div>
+        <div class="label">Theme</div>
+        <div class="hint">
+          Themes work like Spicetify's: a folder with a color.ini of color schemes, and optionally a user.css.
+          {#if spicetifyThemes.length > 0}The themes you installed for Spicetify are listed too.{/if}
+          Find more at github.com/spicetify/spicetify-themes.
+        </div>
+      </div>
+      <select value={themes.prefs.id} onchange={(e) => selectTheme(e.currentTarget.value)} aria-label="Theme">
+        <optgroup label="Built in">
+          {#each themes.list.filter((t) => t.source === "builtin") as theme (theme.id)}
+            <option value={theme.id}>{theme.name}</option>
+          {/each}
+        </optgroup>
+        {#if ownThemes.length > 0}
+          <optgroup label="Your themes">
+            {#each ownThemes as theme (theme.id)}
+              <option value={theme.id}>{theme.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
+        {#if spicetifyThemes.length > 0}
+          <optgroup label="From Spicetify">
+            {#each spicetifyThemes as theme (theme.id)}
+              <option value={theme.id}>{theme.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
+        {#if !currentTheme}
+          <option value={themes.prefs.id}>{themes.prefs.id.split(":").slice(1).join(":")}</option>
+        {/if}
+      </select>
+    </div>
+    {#if currentTheme && currentTheme.schemes.length > 1}
+      <div class="row">
+        <div>
+          <div class="label">Color scheme</div>
+          <div class="hint">{currentTheme.schemes.length} in this theme.</div>
+        </div>
+        <select
+          value={themes.prefs.scheme}
+          onchange={(e) => selectTheme(themes.prefs.id, { scheme: e.currentTarget.value, css: themes.prefs.css })}
+          aria-label="Color scheme"
+        >
+          {#each currentTheme.schemes as scheme}
+            <option value={scheme}>{scheme}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+    {#if currentTheme?.has_css}
+      <div class="row">
+        <div>
+          <div class="label">Use the theme's CSS</div>
+          <div class="hint">
+            {#if currentTheme.source === "spicetify"}
+              Its user.css was written for Spotify's own window: fonts, scrollbars and a few details carry over, the
+              rest doesn't apply here. Turn it off if anything looks broken.
+            {:else}
+              The theme's user.css can restyle more than colors.
+            {/if}
+            If a theme ever leaves SpotiLarp unusable, run <span class="mono">spotilarp reset-theme</span>.
+          </div>
+        </div>
+        <Toggle
+          on={themes.prefs.css}
+          onclick={() => selectTheme(themes.prefs.id, { scheme: themes.prefs.scheme, css: !themes.prefs.css })}
+          label="Use the theme's CSS"
+        />
+      </div>
+    {/if}
+    <div class="row">
+      <div>
+        <div class="label">Your themes</div>
+        <div class="hint">
+          Add a theme folder, or a folder of them (a download of spicetify-themes, say), or put them in the themes folder
+          yourself. Reload after editing one.
+        </div>
+      </div>
+      <div class="buttons">
+        <button type="button" class="secondary" onclick={addThemes} disabled={importingThemes}>
+          {importingThemes ? "Adding..." : "Add themes..."}
+        </button>
+        <button type="button" class="secondary" onclick={() => api.openThemesFolder().catch((e) => notify(`Couldn't open the folder: ${e}`))}>
+          Open folder
+        </button>
+        <button type="button" class="secondary" onclick={reloadThemes} disabled={themes.loading}>Reload</button>
+      </div>
+    </div>
+    {#if themes.error}
+      <p class="hint error-text">{themes.error}</p>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Spotify app</h2>
+    <div class="row">
+      <div>
+        <div class="label">Client ID</div>
+        <div class="hint">
+          The app you made on Spotify's developer dashboard, which SpotiLarp uses to read your library and search.
+          {#if clientId}Now using <span class="mono">{clientId.slice(0, 4)}…{clientId.slice(-4)}</span>.{/if}
+          Spotify limits how often each app can ask it things, so if it holds this one back for hours, make another
+          app and switch to its Client ID here. You'll log in again with the new app; playback stays connected.
+        </div>
+      </div>
+      {#if onChangeClientId}
+        <button type="button" class="secondary" onclick={onChangeClientId}>Change...</button>
+      {/if}
+    </div>
+  </section>
+
   <section>
     <h2>Playback</h2>
     <div class="row">
@@ -359,10 +544,50 @@
         </button>
       </div>
     </div>
+    <div class="row">
+      <div>
+        <div class="label">Listening history</div>
+        <div class="hint">
+          Songs played in SpotiLarp, shown under Queue → Recent next to Spotify's own history (which doesn't include
+          them). Kept on this computer only. {history.entries.length}
+          {history.entries.length === 1 ? "play" : "plays"} saved.
+        </div>
+      </div>
+      <button type="button" class="secondary" onclick={clearHistory} disabled={history.entries.length === 0}>Clear</button>
+    </div>
+    <div class="row">
+      <div>
+        <div class="label">Podcast progress</div>
+        <div class="hint">
+          Where you stopped in each episode and which ones you finished. Spotify doesn't hear about listening in SpotiLarp,
+          so this is kept on this computer only, and progress from your other devices doesn't show here.
+        </div>
+      </div>
+      <button
+        type="button"
+        class="secondary"
+        onclick={clearEpisodeProgress}
+        disabled={Object.keys(episodes.byUri).length === 0}
+      >
+        Clear
+      </button>
+    </div>
   </section>
 
   <section>
     <h2>Desktop</h2>
+    <div class="row">
+      <div>
+        <div class="label">Zoom</div>
+        <div class="hint">How big everything is drawn. Ctrl+= and Ctrl+- (or Ctrl+scroll) change it anywhere, Ctrl+0 resets it.</div>
+      </div>
+      <select value={zoom.level} onchange={(e) => setZoom(Number(e.currentTarget.value))} aria-label="Zoom">
+        {#each ZOOM_LEVELS as level}
+          <option value={level}>{Math.round(level * 100)}%</option>
+        {/each}
+      </select>
+    </div>
+
     <div class="row">
       <div>
         <div class="label">Close button minimizes to the tray</div>
@@ -418,9 +643,41 @@
       <div class="shortcut"><kbd>{keys}</kbd><span>{action}</span></div>
     {/each}
   </section>
+
+  <section>
+    <h2>Command line</h2>
+    <div class="hint status-line">
+      Run SpotiLarp's program (spotilarp.exe in its install folder on Windows) with a command to control the copy
+      that's already open, from a terminal, a launcher or a hotkey tool:
+    </div>
+    <div class="shortcut"><kbd>spotilarp play-pause</kbd><span>Also play, pause, next, previous, mute, like</span></div>
+    <div class="shortcut"><kbd>spotilarp volume 40</kbd><span>Also volume-up / volume-down [step]</span></div>
+    <div class="shortcut"><kbd>spotilarp seek 15</kbd><span>Skip 15 seconds (seek -- -15 goes back); seek-to 90 jumps</span></div>
+    <div class="shortcut"><kbd>spotilarp shuffle smart</kbd><span>on, smart, off, or cycle; repeat off / all / one</span></div>
+    <div class="shortcut"><kbd>spotilarp &lt;Spotify link&gt;</kbd><span>Plays a song, album, playlist or artist link</span></div>
+    <div class="shortcut"><kbd>spotilarp search words</kbd><span>Opens a search</span></div>
+  </section>
+  </div>
 {/if}
 
 <style>
+.settings-search {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: -0.4em 0 1.6em;
+  padding: 0.55em 1em;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--control-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+.settings-search:focus {
+  border-color: var(--text);
+}
 .title {
   margin: 0 0 1em;
   font-size: var(--fs-xl);
@@ -565,6 +822,20 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5em;
+}
+.buttons {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+.mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  color: var(--text);
+}
+.error-text {
+  color: var(--danger);
 }
 .chip.active {
   border-color: var(--accent);

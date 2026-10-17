@@ -95,9 +95,17 @@ fn map_event(event: PlayerEvent) -> Option<PlaybackEvent> {
                     album.clone().unwrap_or_default(),
                     None,
                 ),
-                UniqueFields::Episode { show_name, .. } => {
-                    (String::new(), None, Vec::new(), show_name.clone(), None)
-                }
+                // The show stands in for the artist (notifications, tray, Discord).
+                UniqueFields::Episode { show_name, .. } => (
+                    show_name.clone(),
+                    None,
+                    vec![ArtistRef {
+                        id: None,
+                        name: show_name.clone(),
+                    }],
+                    show_name.clone(),
+                    None,
+                ),
             };
             let cover_url = audio_item.covers.first().map(|c| c.url.clone());
             Some(PlaybackEvent::TrackChanged {
@@ -123,6 +131,17 @@ struct CurrentTrack {
     cover_url: Option<String>,
     duration_ms: u32,
     track_url: Option<String>,
+}
+
+/// The open.spotify.com page for a song or podcast episode URI.
+fn web_link(uri: &str) -> Option<String> {
+    let mut parts = uri.split(':');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("spotify"), Some(kind @ ("track" | "episode")), Some(id), None) if !id.is_empty() => {
+            Some(format!("https://open.spotify.com/{kind}/{id}"))
+        }
+        _ => None,
+    }
 }
 
 fn announce_track(app: &AppHandle, name: &str, artists: &str) {
@@ -172,6 +191,8 @@ pub fn spawn_hub(app: AppHandle) -> EventSender {
     tauri::async_runtime::spawn(async move {
         let mut current_track: Option<CurrentTrack> = None;
         let mut is_playing = false;
+        #[cfg(target_os = "windows")]
+        let mut was_playing = false;
         while let Some((source, mapped)) = events.recv().await {
             // Switching players stops the other one, and its late events (like a
             // Stopped landing after the new song started) mustn't reach the UI.
@@ -187,7 +208,7 @@ pub fn spawn_hub(app: AppHandle) -> EventSender {
                     album,
                     duration_ms,
                     cover_url,
-                    track_id,
+                    uri,
                     ..
                 } => {
                     announce_track(&app, name, artists);
@@ -200,9 +221,7 @@ pub fn spawn_hub(app: AppHandle) -> EventSender {
                             url.starts_with("https://") || app.state::<AppState>().settings().discord_local_covers
                         }),
                         duration_ms: *duration_ms,
-                        track_url: track_id
-                            .as_ref()
-                            .map(|id| format!("https://open.spotify.com/track/{id}")),
+                        track_url: web_link(uri),
                     });
                 }
                 PlaybackEvent::Playing { position_ms } | PlaybackEvent::Seeked { position_ms } => {
@@ -289,8 +308,33 @@ pub fn spawn_hub(app: AppHandle) -> EventSender {
                 update_media(&app, update);
             }
 
+            #[cfg(target_os = "windows")]
+            if is_playing != was_playing {
+                was_playing = is_playing;
+                crate::thumbbar::set_playing(&app, is_playing);
+            }
+
             let _ = app.emit("player-event", mapped);
         }
     });
     sender
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_link;
+
+    #[test]
+    fn links_songs_and_episodes() {
+        assert_eq!(
+            web_link("spotify:track:abc").as_deref(),
+            Some("https://open.spotify.com/track/abc")
+        );
+        assert_eq!(
+            web_link("spotify:episode:xyz").as_deref(),
+            Some("https://open.spotify.com/episode/xyz")
+        );
+        assert_eq!(web_link("spotify:local:a:b:c:10"), None);
+        assert_eq!(web_link("spotify:track:"), None);
+    }
 }

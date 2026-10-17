@@ -37,8 +37,8 @@
   padding: 0.7em 1.1em;
   border: none;
   border-radius: var(--radius-md);
-  background: #2e77d0;
-  color: var(--text);
+  background: var(--toast-bg);
+  color: var(--toast-text);
   font: inherit;
   font-size: var(--fs-sm);
   text-align: left;

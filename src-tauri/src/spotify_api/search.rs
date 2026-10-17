@@ -26,12 +26,20 @@ pub async fn search_all(client: &mut SpotifyClient, query: &str) -> Result<Searc
     let response: SearchResponse = client
         .get_json(
             "/search",
-            &[("q", query), ("type", "track,artist,album"), ("limit", SEARCH_PAGE_SIZE)],
+            &[("q", query), ("type", "track,artist,album,show,episode"), ("limit", SEARCH_PAGE_SIZE)],
         )
         .await?;
     Ok(SearchResults {
         tracks: response.tracks.map(|page| page.items).unwrap_or_default(),
         artists: response.artists.map(|page| page.items).unwrap_or_default(),
         albums: response.albums.map(|page| page.items).unwrap_or_default(),
+        shows: response
+            .shows
+            .map(|page| page.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|show| !show.id.is_empty())
+            .collect(),
+        episodes: response.episodes.map(|page| page.items).unwrap_or_default(),
     })
 }

@@ -1,9 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api.js";
 import { notify } from "./toast.svelte.js";
-import { queue, next, previous, hasPrevious, prepareNext, playCurrent } from "./queue.svelte.js";
+import { queue, next, previous, hasPrevious, prepareNext, playCurrent, slim, updateCurrent } from "./queue.svelte.js";
+import { isEpisodeUri, recordPosition, episodeTrack } from "./podcasts.svelte.js";
 import { setFadeHandler } from "./sleep.svelte.js";
 import { dominantColor } from "./colors.js";
+import { LOCAL_URI_PREFIX } from "./constants.js";
 
 const VOLUME_KEY = "spotilarp.volume";
 const SESSION_KEY = "spotilarp.nowPlaying";
@@ -74,10 +76,16 @@ setFadeHandler((level) => {
   api.setVolume(Math.round((player.volume / 100) * 65535 * level)).catch(() => {});
 });
 
+/** Where playback is right now (the on-screen position only moves a few times a second). */
+function currentPositionMs() {
+  if (!player.isPlaying || !player.track) return player.positionMs;
+  return Math.min(anchorMs + (performance.now() - anchorAt), player.track.durationMs);
+}
+
 function saveSession() {
   try {
     if (player.track) {
-      const session = { track: $state.snapshot(player.track), positionMs: Math.round(player.positionMs) };
+      const session = { track: $state.snapshot(player.track), positionMs: Math.round(currentPositionMs()) };
       localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     }
   } catch {}
@@ -96,10 +104,39 @@ setInterval(() => {
   player.positionMs = Math.min(ms, player.track.durationMs);
 }, TICK_MS);
 
+/** Remembers your place in a podcast episode. */
+function recordEpisode() {
+  const t = player.track;
+  if (!t?.uri || !isEpisodeUri(t.uri) || !player.loaded) return;
+  const track = queue.current?.uri === t.uri ? slim(queue.current) : null;
+  recordPosition(t.uri, currentPositionMs(), t.durationMs, track);
+}
+
+/**
+ * Search results don't say which show an episode is from, so it's asked for
+ * once the episode plays.
+ * @param {string} uri
+ */
+async function completeEpisode(uri) {
+  const current = queue.current;
+  if (!current || current.uri !== uri || current.show) return;
+  try {
+    const episode = await api.getEpisode(current.id);
+    if (!episode.show) return;
+    const { show, artists, album } = episodeTrack(episode);
+    updateCurrent(uri, { show, artists, album });
+  } catch {}
+}
+
 setInterval(() => {
-  if (player.isPlaying) saveSession();
+  if (!player.isPlaying) return;
+  saveSession();
+  recordEpisode();
 }, SAVE_POSITION_MS);
-window.addEventListener("pagehide", saveSession);
+window.addEventListener("pagehide", () => {
+  saveSession();
+  recordEpisode();
+});
 
 api.setVolume(Math.round((player.volume / 100) * 65535)).catch(() => {});
 
@@ -107,6 +144,8 @@ listen("player-event", (event) => {
   const e = /** @type {import("./types.js").PlaybackEvent} */ (event.payload);
   switch (e.type) {
     case "TrackChanged":
+      // Your place in the episode being left.
+      recordEpisode();
       player.loaded = true;
       player.track = {
         name: e.name ?? "",
@@ -122,6 +161,7 @@ listen("player-event", (event) => {
       setPosition(0);
       saveSession();
       updateColor(player.track.coverUrl);
+      if (isEpisodeUri(e.uri)) completeEpisode(e.uri ?? "");
       break;
     case "Playing":
       player.isPlaying = true;
@@ -131,10 +171,14 @@ listen("player-event", (event) => {
       player.isPlaying = false;
       setPosition(e.position_ms ?? 0);
       saveSession();
+      recordEpisode();
       break;
     case "PositionChanged":
+      setPosition(e.position_ms ?? 0);
+      break;
     case "Seeked":
       setPosition(e.position_ms ?? 0);
+      recordEpisode();
       break;
     case "Stopped":
     case "EndOfTrack":
@@ -206,6 +250,15 @@ export function restartAfterPlayerRebuild() {
   if (wasPlaying) playCurrent(player.positionMs);
 }
 
+// Spotify dropped the playback session and the backend connected again: a
+// Spotify song carries on from where it was (a local file never stopped).
+listen("playback-reconnected", () => {
+  if (!player.track || player.track.uri?.startsWith(LOCAL_URI_PREFIX)) return;
+  const wasPlaying = player.isPlaying;
+  restartAfterPlayerRebuild();
+  if (wasPlaying) notify("Reconnected to Spotify");
+});
+
 export function resetPlayer() {
   player.track = null;
   player.isPlaying = false;
@@ -231,6 +284,12 @@ export async function seekTo(ms) {
   } catch (e) {
     notify(`${e}`);
   }
+}
+
+/** @param {number} ms forward, or back when negative */
+export function seekBy(ms) {
+  if (!player.track) return;
+  seekTo(Math.min(Math.max(player.positionMs + ms, 0), player.track.durationMs));
 }
 
 /** @param {number} pct */

@@ -1,9 +1,20 @@
 <script>
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import * as api from "$lib/api.js";
-  import { contextLabel, playFromList, next, toggleShuffle, cycleRepeatMode, resetQueue } from "$lib/queue.svelte.js";
-  import { openTrackMenu } from "$lib/contextMenu.svelte.js";
+  import "$lib/themes.svelte.js";
+  import {
+    queue,
+    contextLabel,
+    playFromList,
+    next,
+    toggleShuffle,
+    shuffleLabels,
+    cycleRepeatMode,
+    resetQueue,
+  } from "$lib/queue.svelte.js";
+  import { openTrackMenu, closeMenu } from "$lib/contextMenu.svelte.js";
   import {
     player,
     togglePlay,
@@ -14,13 +25,22 @@
     resetPlayer,
   } from "$lib/player.svelte.js";
   import { notify } from "$lib/toast.svelte.js";
-  import { nav, navigate, goBack, goForward, resetNav } from "$lib/nav.svelte.js";
-  import { loadLibrary, clearLibrary } from "$lib/library.svelte.js";
-  import { likedIds } from "$lib/likes.svelte.js";
+  import { nav, navigate, goBack, goForward, resetNav, openArtist, openAlbum, openShow } from "$lib/nav.svelte.js";
+  import { library, loadLibrary, loadFolders, clearLibrary } from "$lib/library.svelte.js";
+  import { likedIds, toggleLike, clearLikes } from "$lib/likes.svelte.js";
+  import { isTextField } from "$lib/keys.js";
+  import { openSpotifyLink } from "$lib/openLink.js";
+  import { parseSpotifyLink } from "$lib/links.js";
+  import { runLaunchCommands } from "$lib/remote.js";
+  import { zoom, zoomIn, zoomOut, resetZoom, suspendZoom } from "$lib/zoom.svelte.js";
+  import "$lib/history.svelte.js";
+  import { LIKED_SONGS_ID } from "$lib/constants.js";
   import PlaylistSidebar from "$lib/components/PlaylistSidebar.svelte";
   import MainContent from "$lib/components/MainContent.svelte";
   import { clearPlaylistCache } from "$lib/components/views/PlaylistView.svelte";
   import { clearStatsCache } from "$lib/components/views/StatsView.svelte";
+  import { clearRadioCache } from "$lib/components/views/RadioView.svelte";
+  import ShortcutsDialog from "$lib/components/ShortcutsDialog.svelte";
   import NowPlaying from "$lib/components/NowPlaying.svelte";
   import NowPlayingPanel from "$lib/components/NowPlayingPanel.svelte";
   import QueuePanel from "$lib/components/QueuePanel.svelte";
@@ -55,6 +75,36 @@
   let showPanel = $state(true);
   let panelView = $state("nowPlaying");
   let miniMode = $state(false);
+
+  /** How long the window is out of sight before the interface is let go. */
+  const ASLEEP_AFTER_MS = 30_000;
+  // While minimized or in the tray for a while, the interface (lists, covers,
+  // pages) is let go to save memory; playback, the queue and history carry
+  // on, and it all comes back when the window does.
+  let uiAsleep = $state(false);
+  /** @type {ReturnType<typeof setTimeout>|undefined} */
+  let asleepHandle;
+
+  /**
+   * @param {boolean} hidden
+   * @param {boolean} [now] at launch, hidden from the start
+   */
+  function onBackground(hidden, now = false) {
+    clearTimeout(asleepHandle);
+    if (!hidden) uiAsleep = false;
+    else if (now) fallAsleep();
+    else asleepHandle = setTimeout(fallAsleep, ASLEEP_AFTER_MS);
+  }
+
+  function fallAsleep() {
+    // A menu left open would come back on its own when the window does.
+    closeMenu();
+    uiAsleep = true;
+  }
+  let showSidebar = $state(true);
+  let showShortcuts = $state(false);
+  let lyricsFullscreen = $state(false);
+  let launchCommandsRun = false;
 
   let searchQuery = $state("");
   /** @type {import("$lib/types.js").Track[]} */
@@ -159,8 +209,23 @@
       pickResult(highlighted);
     } else if (evt.key === "Enter" && searchQuery.trim()) {
       evt.preventDefault();
-      openSearchPage();
+      if (parseSpotifyLink(searchQuery)) openLinkFromSearch();
+      else openSearchPage();
     }
+  }
+
+  // A pasted Spotify link opens its song, album, playlist or artist.
+  function openLinkFromSearch() {
+    const link = searchQuery;
+    clearTimeout(debounceHandle);
+    searchToken++;
+    showDropdown = false;
+    highlighted = -1;
+    searchQuery = "";
+    searchResults = [];
+    resultsFor = "";
+    searchInput?.blur();
+    openSpotifyLink(link);
   }
 
   function openSearchPage() {
@@ -174,36 +239,93 @@
 
   /** @param {boolean} enabled */
   async function setMiniMode(enabled) {
+    // The mini player is laid out for its fixed size, so it isn't zoomed.
+    if (enabled) suspendZoom(true);
     try {
       await api.setMiniMode(enabled);
       miniMode = enabled;
     } catch (e) {
       notify(`Couldn't switch the mini player: ${e}`);
     }
+    if (!miniMode) suspendZoom(false);
   }
 
   const VOLUME_STEP = 10;
   const SEEK_STEP_MS = 5000;
 
-  /** @param {EventTarget|null} target */
-  function isTextField(target) {
-    if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
-    if (target instanceof HTMLElement && target.isContentEditable) return true;
-    return target instanceof HTMLInputElement && !["range", "checkbox", "radio", "button"].includes(target.type);
+  const LIKED_SONGS = { id: LIKED_SONGS_ID, name: "Liked Songs", isLikedSongs: true, images: [], track_count: { total: 0 } };
+
+  function toggleLyrics() {
+    if (lyricsFullscreen) setLyricsFullscreen(false);
+    else nav.lyrics = !nav.lyrics;
+  }
+
+  /** @param {boolean} on */
+  async function setLyricsFullscreen(on) {
+    if (miniMode) return;
+    lyricsFullscreen = on;
+    if (on) nav.lyrics = true;
+    try {
+      await getCurrentWindow().setFullscreen(on);
+    } catch {}
+  }
+
+  // Going anywhere but lyrics (Ctrl+H, a link...) leaves full screen.
+  $effect(() => {
+    if (lyricsFullscreen && !nav.lyrics) setLyricsFullscreen(false);
+  });
+
+  async function likePlaying() {
+    const id = player.track?.trackId;
+    if (!id) return;
+    const wasLiked = likedIds.has(id);
+    await toggleLike(id);
+    if (likedIds.has(id) !== wasLiked) notify(wasLiked ? "Removed from Liked Songs" : "Saved to Liked Songs");
+  }
+
+  // Three modes look alike on the button, so a key press says which one it picked.
+  function cycleShuffle() {
+    toggleShuffle();
+    notify(shuffleLabels().state);
+  }
+
+  function goToPlayingArtist() {
+    const t = player.track;
+    if (t?.primaryArtistId) openArtist({ id: t.primaryArtistId, name: t.artistList?.[0]?.name ?? "" });
+  }
+
+  function goToPlayingAlbum() {
+    if (queue.current?.uri !== player.track?.uri) return;
+    if (queue.current?.album.id) openAlbum(queue.current.album);
+    else if (queue.current?.show) openShow(queue.current.show);
   }
 
   /** @param {KeyboardEvent} evt */
   function onWindowKeydown(evt) {
+    const ctrl = evt.ctrlKey || evt.metaKey;
+    if (ctrl && !evt.altKey && ["=", "+", "-", "_", "0"].includes(evt.key)) {
+      evt.preventDefault();
+      if (miniMode) return;
+      if (evt.key === "0") resetZoom();
+      else if (evt.key === "-" || evt.key === "_") zoomOut();
+      else zoomIn();
+      notify(`Zoom ${Math.round(zoom.level * 100)}%`);
+      return;
+    }
     if (!clientIdConfigured) return;
     const typing = isTextField(evt.target);
-    const ctrl = evt.ctrlKey || evt.metaKey;
-    if (evt.altKey && (evt.key === "ArrowLeft" || evt.key === "ArrowRight")) {
+    const plain = !typing && !ctrl && !evt.altKey;
+    const key = evt.key.toLowerCase();
+    if (showShortcuts) return;
+    if (evt.key === "Escape" && lyricsFullscreen) {
+      setLyricsFullscreen(false);
+    } else if (evt.altKey && (evt.key === "ArrowLeft" || evt.key === "ArrowRight")) {
       evt.preventDefault();
       if (evt.key === "ArrowLeft") goBack();
       else goForward();
-    } else if (ctrl && !evt.shiftKey && !evt.altKey && (evt.key === "s" || evt.key === "r")) {
+    } else if (ctrl && !evt.shiftKey && !evt.altKey && (key === "s" || key === "r")) {
       evt.preventDefault();
-      if (evt.key === "s") toggleShuffle();
+      if (key === "s") cycleShuffle();
       else cycleRepeatMode();
     } else if (!typing && ctrl && !evt.shiftKey && !evt.altKey && evt.key.startsWith("Arrow")) {
       evt.preventDefault();
@@ -217,13 +339,34 @@
         const step = evt.key === "ArrowRight" ? SEEK_STEP_MS : -SEEK_STEP_MS;
         seekTo(Math.min(Math.max(player.positionMs + step, 0), player.track.durationMs));
       }
-    } else if (!typing && !ctrl && !evt.altKey && evt.key.toLowerCase() === "m") {
-      toggleMute();
-    } else if (((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "f") || (!typing && evt.key === "/")) {
+    } else if ((ctrl && key === "f") || (!typing && evt.key === "/" && !ctrl)) {
       evt.preventDefault();
+      if (lyricsFullscreen) setLyricsFullscreen(false);
       searchInput?.focus();
       searchInput?.select();
-    } else if (!typing && evt.code === "Space" && !evt.ctrlKey && !evt.metaKey && !evt.altKey) {
+    } else if ((ctrl && evt.key === "/") || (plain && evt.key === "?")) {
+      evt.preventDefault();
+      showShortcuts = true;
+    } else if (ctrl && !evt.shiftKey && !evt.altKey && ["h", "l", "b", ",", "q"].includes(key)) {
+      evt.preventDefault();
+      if (key === "h") navigate({ type: "home" });
+      else if (key === "l") navigate({ type: "playlist", playlist: LIKED_SONGS });
+      else if (key === "b") showSidebar = !showSidebar;
+      else if (key === ",") navigate({ type: "settings" });
+      else api.quitApp().catch(() => {});
+    } else if (ctrl && evt.shiftKey && !evt.altKey && (key === "a" || key === "b")) {
+      evt.preventDefault();
+      if (key === "a") goToPlayingArtist();
+      else goToPlayingAlbum();
+    } else if (plain && !evt.shiftKey && !evt.repeat && ["m", "b", "s", "r", "q", "l", "f"].includes(key)) {
+      if (key === "m") toggleMute();
+      else if (key === "b") likePlaying();
+      else if (key === "s") cycleShuffle();
+      else if (key === "r") cycleRepeatMode();
+      else if (key === "q") toggleQueue();
+      else if (key === "l") toggleLyrics();
+      else setLyricsFullscreen(!lyricsFullscreen);
+    } else if (!typing && evt.code === "Space" && !ctrl && !evt.altKey) {
       evt.preventDefault();
       if (!evt.repeat) togglePlay();
     }
@@ -240,19 +383,43 @@
     const stopListening = listen("playback-connection", (event) => {
       playbackConnected = /** @type {boolean} */ (event.payload);
       playbackStatus = playbackConnected ? "Playback connected" : "Not connected";
+      // Folders come through the playback session.
+      if (playbackConnected && loggedIn && !library.folders) loadFolders();
     });
     api.hasClientId().then((configured) => {
       clientIdConfigured = configured;
       if (configured) restoreSessionIfPossible();
     });
+    const stopBackground = listen("app-background", (event) => onBackground(/** @type {boolean} */ (event.payload)));
+    // Started minimized to the tray (launch on startup): nothing to draw yet.
+    api
+      .windowHidden()
+      .then((hidden) => hidden && onBackground(true, true))
+      .catch(() => {});
     return () => {
       stopListening.then((stop) => stop());
+      stopBackground.then((stop) => stop());
+      clearTimeout(asleepHandle);
     };
   });
 
-  function onClientIdSaved() {
+  async function onClientIdSaved() {
     clientIdConfigured = true;
     changingClientId = false;
+    // A different Client ID ends the old app's login (playback's stays):
+    // log in again with the new one straight away.
+    if (loggedIn && !(await api.loginStatus().catch(() => false))) {
+      loggedIn = false;
+      displayName = "";
+      status = "Not logged in";
+      clearLibrary();
+      clearLikes();
+      clearPlaylistCache();
+      clearStatsCache();
+      clearRadioCache();
+      login();
+      return;
+    }
     restoreSessionIfPossible();
   }
 
@@ -273,6 +440,10 @@
     displayName = name;
     status = `Logged in as ${name}`;
     loadLibrary();
+    if (!launchCommandsRun) {
+      launchCommandsRun = true;
+      runLaunchCommands();
+    }
     if (!playbackConnected && !connecting && (await api.hasConnectSession())) {
       connectPlayback(false);
     }
@@ -331,9 +502,10 @@
       displayName = "";
       status = "Not logged in";
       clearLibrary();
-      likedIds.clear();
+      clearLikes();
       clearPlaylistCache();
       clearStatsCache();
+      clearRadioCache();
       resetQueue();
       resetPlayer();
       resetNav();
@@ -382,9 +554,9 @@
     <WindowControls />
   </div>
   <ClientIdSetup onSaved={onClientIdSaved} onCancel={changingClientId ? cancelClientIdChange : undefined} />
-{:else if clientIdConfigured === true}
+{:else if clientIdConfigured === true && !uiAsleep}
 
-<div class="app">
+<div class="app" class:lyrics-fullscreen={lyricsFullscreen}>
   <header class="topbar" data-tauri-drag-region="deep">
     <h1><span class="dot" class:on={loggedIn}></span>SpotiLarp</h1>
 
@@ -505,8 +677,9 @@
         type="button"
         class="panel-toggle"
         class:active={nav.lyrics}
-        onclick={() => (nav.lyrics = !nav.lyrics)}
+        onclick={toggleLyrics}
         aria-label={nav.lyrics ? "Hide lyrics" : "Show lyrics"}
+        title="Lyrics (L, F for full screen)"
         aria-pressed={nav.lyrics}
       >
         <Icon name="lyrics" size={18} />
@@ -538,11 +711,16 @@
   </header>
 
   <div class="body">
-    <aside class="sidebar-area">
+    <aside class="sidebar-area" class:collapsed={!showSidebar}>
       <PlaylistSidebar {loggedIn} />
     </aside>
     <main class="content-area">
-      <MainContent {loggedIn} {loggingIn} onRelogin={relogin} />
+      <MainContent {loggedIn} {loggingIn} onRelogin={relogin} onChangeClientId={changeClientId} />
+      {#if lyricsFullscreen}
+        <button type="button" class="panel-toggle exit-fullscreen" onclick={() => setLyricsFullscreen(false)} aria-label="Leave full screen" title="Leave full screen (Esc)">
+          <Icon name="close" size={18} />
+        </button>
+      {/if}
     </main>
     <div class="panel-area" class:collapsed={!showPanel}>
       {#if panelView === "queue"}
@@ -564,6 +742,9 @@
 {/if}
 <Toasts />
 <TrackContextMenu />
+{#if showShortcuts}
+  <ShortcutsDialog onClose={() => (showShortcuts = false)} />
+{/if}
 </div>
 
 <style>
@@ -653,6 +834,18 @@
 
   --danger: #f15e6c;
 
+  /* Panels, so themes can color them apart (Spicetify's main, sidebar, player). */
+  --main-bg: var(--surface);
+  --sidebar-bg: var(--surface);
+  --player-bg: var(--bg);
+  --highlight-strong: #3e3e3e;
+  --control-hover: #333333;
+  --selected-row-bg: #3e3e3e;
+  --track-bg: #4d4d4d;
+  --toggle-off: #535353;
+  --toast-bg: #2e77d0;
+  --toast-text: #ffffff;
+
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -722,7 +915,7 @@
   background-clip: padding-box;
 }
 :global(::-webkit-scrollbar-thumb:hover) {
-  background: #3e3e3e;
+  background: var(--highlight-strong);
   background-clip: padding-box;
 }
 
@@ -802,7 +995,7 @@ h1 {
   transition: border-color var(--transition), background-color var(--transition);
 }
 .search-bar:hover {
-  background-color: #3a3a3a;
+  background-color: var(--control-hover);
 }
 .search-bar:focus-within {
   border-color: var(--text);
@@ -977,12 +1170,33 @@ h1 {
   overflow: hidden;
 }
 
+.sidebar-area.collapsed,
+.lyrics-fullscreen .sidebar-area,
+.lyrics-fullscreen .panel-area,
+.lyrics-fullscreen .topbar {
+  display: none;
+}
+.app.lyrics-fullscreen {
+  grid-template-rows: 1fr auto;
+}
+.lyrics-fullscreen .content-area {
+  margin: 0.5em;
+}
+.sidebar-area.collapsed + .content-area {
+  margin-left: 0.5em;
+}
+.exit-fullscreen {
+  position: absolute;
+  top: 1em;
+  right: 1em;
+  z-index: 5;
+}
 .sidebar-area {
   width: 280px;
   flex-shrink: 0;
   padding: 1em 0.5em;
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--sidebar-bg);
   border-radius: var(--radius-md);
   margin: 0.5em 0.5em 0.5em 0.5em;
 }
@@ -994,7 +1208,7 @@ h1 {
   padding: 1.5em 2em;
   overflow: hidden;
   display: flex;
-  background: var(--surface);
+  background: var(--main-bg);
   border-radius: var(--radius-md);
   margin: 0.5em 0.5em 0.5em 0;
 }
@@ -1003,7 +1217,7 @@ h1 {
   width: 340px;
   flex-shrink: 0;
   overflow: hidden;
-  background: var(--surface);
+  background: var(--main-bg);
   border-radius: var(--radius-md);
   margin: 0.5em 0.5em 0.5em 0;
   transition: width 260ms cubic-bezier(0.34, 1.1, 0.64, 1), margin var(--transition), opacity 200ms ease;
@@ -1019,7 +1233,7 @@ h1 {
 }
 
 .now-playing-bar {
-  background: var(--bg);
+  background: var(--player-bg);
   border-radius: var(--radius-md);
   margin: 0 0.5em 0.5em 0.5em;
 }

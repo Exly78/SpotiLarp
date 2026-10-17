@@ -1,9 +1,10 @@
 <script>
   import { tick } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import * as api from "../api.js";
-  import { smallestCover, releaseType } from "../utils.js";
+  import { smallestCover, releaseType, coverAtLeast } from "../utils.js";
   import {
     library,
     loadLibrary,
@@ -11,13 +12,17 @@
     renamePlaylist,
     deletePlaylist,
     removeAlbum,
+    removeShow,
     isOwned,
     adjustTrackCount,
   } from "../library.svelte.js";
   import { likeTracks } from "../likes.svelte.js";
   import { drag } from "../drag.svelte.js";
-  import { nav, navigate, openAlbum } from "../nav.svelte.js";
+  import { nav, navigate, openAlbum, openRadio, openShow } from "../nav.svelte.js";
   import { notify } from "../toast.svelte.js";
+  import { isPinned, togglePin, pins } from "../pins.svelte.js";
+  import { playedAt } from "../played.svelte.js";
+  import { playPlaylist, queuePlaylist, playAlbum, queueAlbum } from "../collections.js";
   import Icon from "./Icon.svelte";
 
   import { LIKED_SONGS_ID, LOCAL_URI_PREFIX } from "../constants.js";
@@ -25,6 +30,7 @@
   /**
    * @typedef {import("../types.js").Playlist} Playlist
    * @typedef {import("../types.js").Album} Album
+   * @typedef {import("../types.js").Show} Show
    */
 
   /** @type {{ loggedIn: boolean }} */
@@ -40,15 +46,188 @@
 
   const selectedId = $derived(nav.view.type === "playlist" ? nav.view.playlist.id : null);
   const selectedAlbumId = $derived(nav.view.type === "album" ? nav.view.id : null);
+  const selectedShowId = $derived(nav.view.type === "show" ? nav.view.id : null);
 
-  let filter = $state(/** @type {"all"|"playlists"|"albums"} */ ("all"));
-  const showPlaylists = $derived(filter !== "albums");
-  const showAlbums = $derived(filter !== "playlists");
+  const FILTER_KEY = "spotilarp.libraryFilter";
+  /** Before the filter was a dropdown, "By you" was a switch of its own. */
+  const BY_YOU_KEY = "spotilarp.libraryByYou";
+  /** @type {Record<string, string>} */
+  const FILTERS = { all: "Everything", playlists: "Playlists", mine: "Playlists by you", albums: "Albums", podcasts: "Podcasts" };
+  const SORT_KEY = "spotilarp.librarySort";
+  /** @type {Record<string, string>} */
+  const SORTS = { default: "Spotify order", recent: "Recently played", name: "Alphabetical" };
 
-  /** @param {"playlists"|"albums"} kind */
-  function toggleFilter(kind) {
-    filter = filter === kind ? "all" : kind;
+  let filter = $state(readFilter());
+  let sort = $state(readSetting(SORT_KEY, "default"));
+  let search = $state("");
+
+  // "Playlists by you" is only playlists the signed-in account owns.
+  const byYou = $derived(filter === "mine");
+  const showPlaylists = $derived(filter === "all" || filter === "playlists" || filter === "mine");
+  const showAlbums = $derived(filter === "all" || filter === "albums");
+  const showShows = $derived(filter === "all" || filter === "podcasts");
+  // Albums and Podcasts are offered once there are some (or while chosen).
+  const filterOptions = $derived(
+    Object.entries(FILTERS).filter(
+      ([value]) =>
+        value === filter ||
+        ((value !== "albums" || library.albums.length > 0) && (value !== "podcasts" || library.shows.length > 0)),
+    ),
+  );
+
+  function readFilter() {
+    const saved = readSetting(FILTER_KEY, "");
+    if (saved in FILTERS) return saved;
+    return readSetting(BY_YOU_KEY, "false") === "true" ? "mine" : "all";
   }
+
+  /** @param {string} value */
+  function chooseFilter(value) {
+    filter = value;
+    saveSetting(FILTER_KEY, value);
+  }
+
+  /**
+   * @param {string} key
+   * @param {string} fallback
+   */
+  function readSetting(key, fallback) {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  /**
+   * @param {string} key
+   * @param {string} value
+   */
+  function saveSetting(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {}
+  }
+
+  /** @param {string} value */
+  function chooseSort(value) {
+    sort = value;
+    saveSetting(SORT_KEY, value);
+  }
+
+  /**
+   * Pinned items first (in pin order), then the chosen order.
+   * @template {{ name: string }} T
+   * @param {T[]} items
+   * @param {(item: T) => string} keyOf
+   */
+  function arrange(items, keyOf) {
+    const query = search.trim().toLowerCase();
+    const matching = query ? items.filter((item) => item.name.toLowerCase().includes(query)) : items;
+    const sorted = [...matching];
+    if (sort === "name") sorted.sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === "recent") sorted.sort((a, b) => playedAt(keyOf(b)) - playedAt(keyOf(a)));
+    const pinOrder = (/** @type {T} */ item) => {
+      const index = pins.keys.indexOf(keyOf(item));
+      return index < 0 ? Infinity : index;
+    };
+    return sorted.sort((a, b) => pinOrder(a) - pinOrder(b));
+  }
+
+  const shownPlaylists = $derived(
+    showPlaylists
+      ? arrange(
+          byYou ? library.playlists.filter((p) => !!library.userId && p.owner?.id === library.userId) : library.playlists,
+          (p) => `playlist:${p.id}`,
+        )
+      : [],
+  );
+  const OPEN_FOLDERS_KEY = "spotilarp.openFolders";
+  /** Folders start closed, like Spotify's. */
+  const openFolders = new SvelteSet(readOpenFolders());
+
+  /** @returns {string[]} */
+  function readOpenFolders() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(OPEN_FOLDERS_KEY) ?? "[]");
+      return Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** @param {string} id */
+  function toggleFolder(id) {
+    if (openFolders.has(id)) openFolders.delete(id);
+    else openFolders.add(id);
+    saveSetting(OPEN_FOLDERS_KEY, JSON.stringify([...openFolders]));
+  }
+
+  /**
+   * @typedef {{ kind: "playlist", key: string, playlist: Playlist, depth: number }
+   *   | { kind: "folder", key: string, id: string, name: string, count: number, depth: number, open: boolean }} Row
+   */
+
+  // In Spotify's order, playlists sit in their folders (read from the
+  // playback session); searching, "By you" or another order lists them flat.
+  const useFolders = $derived(sort === "default" && !search.trim() && !byYou && !!library.folders);
+
+  /** @type {Row[]} */
+  const playlistRows = $derived.by(() => {
+    if (!useFolders || !library.folders) {
+      return shownPlaylists.map((playlist) => ({ kind: "playlist", key: playlist.id, playlist, depth: 0 }));
+    }
+    const entries = library.folders;
+    const byId = new Map(library.playlists.map((p) => [p.id, p]));
+    const pinned = shownPlaylists.filter((p) => isPinned(`playlist:${p.id}`));
+    const pinnedIds = new Set(pinned.map((p) => p.id));
+    const inFolders = new Set(entries.flatMap((e) => (e.type === "playlist" ? [e.id] : [])));
+
+    /** @type {Map<string, number>} */
+    const counts = new Map();
+    /** @type {string[]} */
+    const path = [];
+    for (const entry of entries) {
+      if (entry.type === "folder_start") path.push(entry.id);
+      else if (entry.type === "folder_end") path.pop();
+      else if (byId.has(entry.id)) for (const id of path) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+
+    /** @type {Row[]} */
+    const rows = [...pinned, ...library.playlists.filter((p) => !inFolders.has(p.id) && !pinnedIds.has(p.id))].map(
+      (playlist) => ({ kind: "playlist", key: playlist.id, playlist, depth: 0 }),
+    );
+    /** @type {boolean[]} whether each enclosing folder is open */
+    const open = [];
+    const shown = () => open.every(Boolean);
+    for (const entry of entries) {
+      if (entry.type === "folder_start") {
+        if (shown()) {
+          rows.push({
+            kind: "folder",
+            key: `folder:${entry.id}`,
+            id: entry.id,
+            name: entry.name || "Folder",
+            count: counts.get(entry.id) ?? 0,
+            depth: open.length,
+            open: openFolders.has(entry.id),
+          });
+        }
+        open.push(openFolders.has(entry.id));
+      } else if (entry.type === "folder_end") {
+        open.pop();
+      } else {
+        const playlist = byId.get(entry.id);
+        if (playlist && !pinnedIds.has(playlist.id) && shown()) {
+          rows.push({ kind: "playlist", key: playlist.id, playlist, depth: open.length });
+        }
+      }
+    }
+    return rows;
+  });
+
+  const shownAlbums = $derived(showAlbums ? arrange(library.albums, (a) => `album:${a.id}`) : []);
+  const shownShows = $derived(showShows ? arrange(library.shows, (s) => `show:${s.id}`) : []);
 
   let creating = $state(false);
   let newName = $state("");
@@ -59,10 +238,12 @@
   /** @type {string|null} */
   let dropTargetId = $state(null);
 
-  /** @type {{ playlist: Playlist|null, album: Album|null, x: number, y: number, confirmDelete: boolean }|null} */
+  /** @type {{ playlist: Playlist|null, album: Album|null, show: Show|null, x: number, y: number, confirmDelete: boolean }|null} */
   let menu = $state(null);
   /** @type {HTMLDivElement|undefined} */
   let menuEl = $state();
+  let menuHeight = $state(0);
+  const MENU_EDGE_MARGIN = 8;
   /** @type {string|null} */
   let renamingId = $state(null);
   let renameValue = $state("");
@@ -146,7 +327,7 @@
    */
   function openMenu(evt, playlist) {
     evt.preventDefault();
-    menu = { playlist, album: null, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+    menu = { playlist, album: null, show: null, x: evt.clientX, y: evt.clientY, confirmDelete: false };
   }
 
   /**
@@ -155,7 +336,33 @@
    */
   function openAlbumMenu(evt, album) {
     evt.preventDefault();
-    menu = { playlist: null, album, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+    menu = { playlist: null, album, show: null, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+  }
+
+  /**
+   * @param {MouseEvent} evt
+   * @param {Show} show
+   */
+  function openShowMenu(evt, show) {
+    evt.preventDefault();
+    menu = { playlist: null, album: null, show, x: evt.clientX, y: evt.clientY, confirmDelete: false };
+  }
+
+  /** @param {Show} show */
+  async function unfollowShow(show) {
+    menu = null;
+    try {
+      await removeShow(show.id);
+      notify(`Removed ${show.name} from Your Library`);
+    } catch (e) {
+      notify(`Couldn't remove the podcast: ${e}`);
+    }
+  }
+
+  /** @param {() => unknown} action */
+  function fromMenu(action) {
+    menu = null;
+    action();
   }
 
   /** @param {Album} album */
@@ -288,6 +495,8 @@
           class:active={selectedId === LIKED_SONGS_ID}
           class:drop-target={dropTargetId === LIKED_SONGS_ID}
           onclick={() => open(LIKED_SONGS)}
+          ondblclick={() => playPlaylist(LIKED_SONGS)}
+          title="Double-click to play"
           ondragover={(e) => onDragOver(e, LIKED_SONGS)}
           ondragleave={() => onDragLeave(LIKED_SONGS)}
           ondrop={(e) => onDrop(e, LIKED_SONGS)}
@@ -346,23 +555,56 @@
     {:else if library.error}
       <p class="status error" transition:fade={{ duration: 150 }}>{library.error}</p>
     {:else}
-      {#if library.albums.length > 0}
-        <div class="filters" role="group" aria-label="Show">
-          <button type="button" class="chip" class:selected={filter === "playlists"} onclick={() => toggleFilter("playlists")}>
-            Playlists
-          </button>
-          <button type="button" class="chip" class:selected={filter === "albums"} onclick={() => toggleFilter("albums")}>
-            Albums
-          </button>
-        </div>
-      {/if}
+      <div class="library-tools">
+        <select class="library-select" value={filter} onchange={(e) => chooseFilter(e.currentTarget.value)} aria-label="Show">
+          {#each filterOptions as [value, label]}
+            <option {value}>{label}</option>
+          {/each}
+        </select>
+        <select class="library-select" value={sort} onchange={(e) => chooseSort(e.currentTarget.value)} aria-label="Sort by">
+          {#each Object.entries(SORTS) as [value, label]}
+            <option {value}>{label}</option>
+          {/each}
+        </select>
+      </div>
+      <input
+        type="search"
+        class="library-search"
+        placeholder="Search in Your Library"
+        bind:value={search}
+        spellcheck="false"
+        aria-label="Search in Your Library"
+      />
       {#if showPlaylists && library.playlists.length === 0}
         <p class="status" transition:fade={{ duration: 150 }}>No playlists yet.</p>
+      {:else if search.trim() && shownPlaylists.length === 0 && shownAlbums.length === 0 && shownShows.length === 0}
+        <p class="status" transition:fade={{ duration: 150 }}>Nothing in Your Library matches "{search.trim()}".</p>
       {/if}
       <ul class="playlist-list">
-        {#each showPlaylists ? library.playlists : [] as playlist, i (playlist.id)}
-          <li in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}>
-            {#if renamingId === playlist.id}
+        {#each playlistRows as row, i (row.key)}
+          <li
+            in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}
+            style={row.depth > 0 ? `padding-left: ${row.depth * 0.9}em` : ""}
+          >
+            {#if row.kind === "folder"}
+              <button
+                type="button"
+                class="playlist-button"
+                onclick={() => toggleFolder(row.id)}
+                aria-expanded={row.open}
+                title={row.open ? "Close folder" : "Open folder"}
+              >
+                <div class="thumb folder-thumb">
+                  <Icon name="folder" size={20} />
+                </div>
+                <div class="meta">
+                  <div class="name">{row.name}</div>
+                  <div class="count">{row.count} {row.count === 1 ? "playlist" : "playlists"}</div>
+                </div>
+                <Icon name="chevron-right" size={16} class={row.open ? "folder-chevron open" : "folder-chevron"} />
+              </button>
+            {:else if renamingId === row.playlist.id}
+              {@const playlist = row.playlist}
               <div class="rename-row">
                 <input
                   class="rename-input"
@@ -374,12 +616,14 @@
                 />
               </div>
             {:else}
+              {@const playlist = row.playlist}
               <button
                 type="button"
                 class="playlist-button"
                 class:active={selectedId === playlist.id}
                 class:drop-target={dropTargetId === playlist.id}
                 onclick={() => open(playlist)}
+                ondblclick={() => playPlaylist(playlist)}
                 oncontextmenu={(e) => openMenu(e, playlist)}
                 ondragover={(e) => onDragOver(e, playlist)}
                 ondragleave={() => onDragLeave(playlist)}
@@ -391,7 +635,9 @@
                   <div class="thumb placeholder"></div>
                 {/if}
                 <div class="meta">
-                  <div class="name">{playlist.name}</div>
+                  <div class="name">
+                    {#if isPinned(`playlist:${playlist.id}`)}<span class="pin" title="Pinned">●</span>{/if}{playlist.name}
+                  </div>
                   <div class="count">
                     {playlist.track_count.total} {playlist.track_count.total === 1 ? "track" : "tracks"}
                     {#if playlist.owner?.display_name && playlist.owner.id !== library.userId}
@@ -403,13 +649,14 @@
             {/if}
           </li>
         {/each}
-        {#each showAlbums ? library.albums : [] as album, i (album.id)}
+        {#each shownAlbums as album, i (album.id)}
           <li in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}>
             <button
               type="button"
               class="playlist-button"
               class:active={selectedAlbumId === album.id}
               onclick={() => openAlbum(album)}
+              ondblclick={() => playAlbum(album)}
               oncontextmenu={(e) => openAlbumMenu(e, album)}
             >
               {#if smallestCover(album.images)}
@@ -418,8 +665,33 @@
                 <div class="thumb placeholder"></div>
               {/if}
               <div class="meta">
-                <div class="name">{album.name}</div>
+                <div class="name">
+                  {#if isPinned(`album:${album.id}`)}<span class="pin" title="Pinned">●</span>{/if}{album.name}
+                </div>
                 <div class="count">{albumSubtitle(album)}</div>
+              </div>
+            </button>
+          </li>
+        {/each}
+        {#each shownShows as show, i (show.id)}
+          <li in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}>
+            <button
+              type="button"
+              class="playlist-button"
+              class:active={selectedShowId === show.id}
+              onclick={() => openShow(show)}
+              oncontextmenu={(e) => openShowMenu(e, show)}
+            >
+              {#if smallestCover(show.images)}
+                <img src={smallestCover(show.images)} alt="" class="thumb" />
+              {:else}
+                <div class="thumb folder-thumb"><Icon name="podcast" size={20} /></div>
+              {/if}
+              <div class="meta">
+                <div class="name">
+                  {#if isPinned(`show:${show.id}`)}<span class="pin" title="Pinned">●</span>{/if}{show.name}
+                </div>
+                <div class="count">Podcast</div>
               </div>
             </button>
           </li>
@@ -430,13 +702,57 @@
 </nav>
 
 {#if menu}
-  <div class="menu" role="menu" bind:this={menuEl} style="left: {menu.x}px; top: {menu.y}px">
-    {#if menu.album}
+  <div
+    class="menu"
+    role="menu"
+    bind:this={menuEl}
+    bind:offsetHeight={menuHeight}
+    style="left: {menu.x}px; top: {Math.max(MENU_EDGE_MARGIN, Math.min(menu.y, window.innerHeight - menuHeight - MENU_EDGE_MARGIN))}px"
+  >
+    {#if menu.show}
+      {@const show = menu.show}
+      {@const pinKey = `show:${show.id}`}
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => openShow(show))}>Go to podcast</button>
+      <div class="divider"></div>
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => togglePin(pinKey))}>
+        {isPinned(pinKey) ? "Unpin" : "Pin to top"}
+      </button>
+      <button type="button" role="menuitem" onclick={() => unfollowShow(show)}>Unfollow</button>
+    {:else if menu.album}
       {@const album = menu.album}
+      {@const pinKey = `album:${album.id}`}
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => playAlbum(album))}>Play</button>
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => queueAlbum(album))}>Add to queue</button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() => fromMenu(() => openRadio(`spotify:album:${album.id}`, album.name, coverAtLeast(album.images, 300)))}
+      >
+        Go to album radio
+      </button>
+      <div class="divider"></div>
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => togglePin(pinKey))}>
+        {isPinned(pinKey) ? "Unpin" : "Pin to top"}
+      </button>
       <button type="button" role="menuitem" onclick={() => removeSavedAlbum(album)}>Remove from Your Library</button>
     {:else if menu.playlist}
       {@const playlist = menu.playlist}
       {@const owned = isOwned(playlist)}
+      {@const pinKey = `playlist:${playlist.id}`}
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => playPlaylist(playlist))}>Play</button>
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => queuePlaylist(playlist))}>Add to queue</button>
+      <button
+        type="button"
+        role="menuitem"
+        onclick={() =>
+          fromMenu(() => openRadio(`spotify:playlist:${playlist.id}`, playlist.name, coverAtLeast(playlist.images, 300)))}
+      >
+        Go to playlist radio
+      </button>
+      <div class="divider"></div>
+      <button type="button" role="menuitem" onclick={() => fromMenu(() => togglePin(pinKey))}>
+        {isPinned(pinKey) ? "Unpin" : "Pin to top"}
+      </button>
       {#if owned}
         <button type="button" role="menuitem" onclick={() => startRename(playlist)}>Rename</button>
       {/if}
@@ -466,28 +782,59 @@
   justify-content: space-between;
   padding: 0 0.4em;
 }
-.filters {
+.library-tools {
   display: flex;
-  gap: 0.5em;
+  gap: 0.4em;
   padding: 0 0.4em;
 }
-.chip {
-  padding: 0.4em 0.9em;
-  border: none;
+.library-search,
+.library-select {
+  min-width: 0;
+  padding: 0.45em 0.8em;
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
   background: var(--control-bg);
   color: var(--text);
   font-family: inherit;
   font-size: var(--fs-xs);
+  outline: none;
+}
+.library-select {
+  flex: 1 1 0;
+  text-overflow: ellipsis;
   cursor: pointer;
-  transition: background-color var(--transition);
 }
-.chip:hover {
-  background: #333;
+.library-select:hover {
+  background: var(--control-hover);
 }
-.chip.selected {
-  background: var(--text);
-  color: #000;
+.library-search {
+  margin: 0 0.4em;
+}
+.library-search:focus,
+.library-select:focus {
+  border-color: var(--text);
+}
+.folder-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+}
+:global(.folder-chevron) {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform var(--transition);
+}
+:global(.folder-chevron.open) {
+  transform: rotate(90deg);
+}
+.pin {
+  margin-right: 0.35em;
+  font-size: 0.7em;
+  color: var(--accent);
+  vertical-align: 0.15em;
 }
 h2 {
   font-size: var(--fs-xs);
@@ -705,9 +1052,14 @@ h2 {
   cursor: pointer;
 }
 .menu button:hover {
-  background: #3e3e3e;
+  background: var(--highlight-strong);
 }
 .menu button.danger {
   color: var(--danger);
+}
+.divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border-strong);
 }
 </style>

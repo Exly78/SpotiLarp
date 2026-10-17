@@ -1,5 +1,7 @@
-/** @type {Map<string, Promise<string>>} */
-const cache = new Map();
+import { BoundedCache } from "./boundedCache.js";
+
+/** @type {BoundedCache<string, Promise<string>>} */
+const cache = new BoundedCache(300);
 
 /**
  * @param {string|null|undefined} url

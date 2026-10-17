@@ -1,6 +1,8 @@
 <script module>
-  /** @type {Map<string, import("../../types.js").Album[]>} */
-  const cache = new Map();
+  import { BoundedCache } from "../../boundedCache.js";
+
+  /** @type {BoundedCache<string, import("../../types.js").Album[]>} */
+  const cache = new BoundedCache(10);
 </script>
 
 <script>
@@ -131,11 +133,11 @@ h1 {
   transition: background-color var(--transition);
 }
 .chip:hover {
-  background: #333;
+  background: var(--control-hover);
 }
 .chip.selected {
   background: var(--text);
-  color: #000;
+  color: var(--main-bg);
 }
 .status {
   font-size: var(--fs-sm);

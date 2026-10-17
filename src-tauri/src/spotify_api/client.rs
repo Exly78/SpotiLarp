@@ -17,6 +17,15 @@ const MAX_CONCURRENT_REQUESTS: usize = 6;
 const MAX_RATE_LIMIT_RETRIES: u32 = 3;
 const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
 const MAX_ERROR_BODY_CHARS: usize = 300;
+/// How long to hold off when Spotify says to slow down without saying for how long.
+const DEFAULT_RATE_LIMIT_PAUSE: Duration = Duration::from_secs(30);
+
+/// The start of the error for requests Spotify turned away for coming too
+/// often (the page checks for it).
+pub const RATE_LIMITED: &str = "Spotify is limiting how often SpotiLarp can ask it things";
+
+/// Until when Spotify asked for no more requests: asking anyway only makes the wait longer.
+static RATE_LIMITED_UNTIL: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 
 enum RequestError {
     Unauthorized,
@@ -69,6 +78,10 @@ impl SpotifyClient {
         self.client_id.is_some()
     }
 
+    pub fn client_id(&self) -> Option<&str> {
+        self.client_id.as_deref()
+    }
+
     pub fn set_client_id(&mut self, client_id: String) -> Result<(), String> {
         let changed = self
             .client_id
@@ -76,6 +89,8 @@ impl SpotifyClient {
             .is_some_and(|current| current != client_id);
         self.client_id = Some(client_id);
         if changed {
+            // Spotify's limit was on the old app; the new one hasn't asked for anything yet.
+            clear_rate_limit();
             self.logout()?;
         }
         Ok(())
@@ -229,6 +244,48 @@ impl SpotifyClient {
     where
         T: DeserializeOwned + Send + 'static,
     {
+        Self::fetch_each(http, token, requests).await.into_iter().collect()
+    }
+
+    /// Like `get_json_concurrent`, but a request that fails leaves `None` in
+    /// its place instead of failing them all.
+    pub async fn get_json_concurrent_lenient<T>(
+        &mut self,
+        requests: Vec<(String, Vec<(&'static str, String)>)>,
+    ) -> Result<Vec<Option<T>>, String>
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.with_token(|http, token| {
+            let requests = requests.clone();
+            async move {
+                let mut results = Vec::new();
+                for result in Self::fetch_each::<T>(http, token, requests).await {
+                    match result {
+                        Ok(value) => results.push(Some(value)),
+                        // A new token is needed for all of them.
+                        Err(RequestError::Unauthorized) => return Err(RequestError::Unauthorized),
+                        Err(RequestError::Other(_)) => results.push(None),
+                    }
+                }
+                Ok(results)
+            }
+        })
+        .await
+    }
+
+    /// Every request's answer, in order, a few at a time.
+    async fn fetch_each<T>(
+        http: reqwest::Client,
+        token: String,
+        requests: Vec<(String, Vec<(&'static str, String)>)>,
+    ) -> Vec<Result<T, RequestError>>
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
         let limiter = Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS));
         let count = requests.len();
         let mut tasks = JoinSet::new();
@@ -237,22 +294,28 @@ impl SpotifyClient {
             let token = token.clone();
             let limiter = limiter.clone();
             tasks.spawn(async move {
-                let _permit = limiter
-                    .acquire_owned()
-                    .await
-                    .map_err(|e| RequestError::Other(e.to_string()))?;
-                let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
-                let result = Self::get_json_with::<T>(&http, &token, &path, &query).await?;
-                Ok::<_, RequestError>((index, result))
+                let result = match limiter.acquire_owned().await {
+                    Ok(_permit) => {
+                        let query: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                        Self::get_json_with::<T>(&http, &token, &path, &query).await
+                    }
+                    Err(e) => Err(RequestError::Other(e.to_string())),
+                };
+                (index, result)
             });
         }
 
-        let mut results: Vec<Option<T>> = (0..count).map(|_| None).collect();
+        let mut results: Vec<Option<Result<T, RequestError>>> = (0..count).map(|_| None).collect();
         while let Some(joined) = tasks.join_next().await {
-            let (index, result) = joined.map_err(|e| RequestError::Other(e.to_string()))??;
-            results[index] = Some(result);
+            // A task that panicked can't say which request it was.
+            if let Ok((index, result)) = joined {
+                results[index] = Some(result);
+            }
         }
-        Ok(results.into_iter().flatten().collect())
+        results
+            .into_iter()
+            .map(|result| result.unwrap_or_else(|| Err(RequestError::Other("request didn't finish".to_string()))))
+            .collect()
     }
 
     pub async fn get_all_pages<T>(&mut self, path: &str, page_size: u32) -> Result<Vec<T>, String>
@@ -327,6 +390,9 @@ impl SpotifyClient {
 }
 
 async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+    if let Some(wait) = rate_limited_for() {
+        return Err(rate_limit_message(wait));
+    }
     let mut attempt = 0;
     loop {
         let resp = request
@@ -335,16 +401,51 @@ async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Re
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        if resp.status() == StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RATE_LIMIT_RETRIES {
+        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
             let wait = retry_after(&resp).unwrap_or_else(|| Duration::from_secs(1 << attempt));
-            if wait <= MAX_RETRY_WAIT {
+            if attempt < MAX_RATE_LIMIT_RETRIES && wait <= MAX_RETRY_WAIT {
                 attempt += 1;
                 tokio::time::sleep(wait).await;
                 continue;
             }
+            // Too long to wait here: nothing more is sent until then.
+            let pause = retry_after(&resp).unwrap_or(DEFAULT_RATE_LIMIT_PAUSE);
+            if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
+                *until = Some(Instant::now() + pause);
+            }
+            return Err(rate_limit_message(pause));
         }
         return Ok(resp);
     }
+}
+
+fn clear_rate_limit() {
+    if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
+        *until = None;
+    }
+}
+
+fn rate_limited_for() -> Option<Duration> {
+    let until = (*RATE_LIMITED_UNTIL.lock().ok()?)?;
+    until.checked_duration_since(Instant::now()).filter(|wait| !wait.is_zero())
+}
+
+fn rate_limit_message(wait: Duration) -> String {
+    let minutes = wait.as_secs().div_ceil(60).max(1);
+    let when = if minutes >= 90 {
+        format!("about {} hours", minutes.div_ceil(60))
+    } else if minutes == 1 {
+        "1 minute".to_string()
+    } else {
+        format!("{minutes} minutes")
+    };
+    // A long wait is for this Client ID only; another Spotify app has its own allowance.
+    let switch = if minutes > 15 {
+        " Or make a new app on Spotify's developer dashboard and switch to its Client ID in Settings."
+    } else {
+        ""
+    };
+    format!("{RATE_LIMITED} right now. Try again in {when}.{switch}")
 }
 
 async fn read_body(resp: reqwest::Response, what: &str) -> Result<String, RequestError> {
@@ -369,6 +470,31 @@ fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
         .parse::<u64>()
         .ok()?;
     Some(Duration::from_secs(secs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limit_messages_round_up_to_minutes() {
+        assert!(rate_limit_message(Duration::from_secs(5)).starts_with(RATE_LIMITED));
+        assert!(rate_limit_message(Duration::from_secs(5)).ends_with("in 1 minute."));
+        assert!(rate_limit_message(Duration::from_secs(61)).ends_with("in 2 minutes."));
+        let long = rate_limit_message(Duration::from_secs(20 * 3600));
+        assert!(long.contains("in about 20 hours.") && long.contains("Client ID in Settings"));
+    }
+
+    // (set_client_id itself isn't run here: it would log out the real keychain login.)
+    #[test]
+    fn a_cleared_limit_lets_requests_through() {
+        if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
+            *until = Some(Instant::now() + Duration::from_secs(3600));
+        }
+        assert!(rate_limited_for().is_some());
+        clear_rate_limit();
+        assert!(rate_limited_for().is_none());
+    }
 }
 
 pub(crate) fn truncate(body: &str) -> String {

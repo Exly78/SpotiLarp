@@ -155,7 +155,7 @@
 .progress {
   height: 3px;
   border-radius: var(--radius-pill);
-  background: #4d4d4d;
+  background: var(--track-bg);
   overflow: hidden;
 }
 .fill {

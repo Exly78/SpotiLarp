@@ -1,16 +1,17 @@
 <script>
   import { onMount } from "svelte";
   import * as api from "../../api.js";
-  import { queue, playFromList } from "../../queue.svelte.js";
-  import { refreshLiked } from "../../likes.svelte.js";
+  import { playFromList, addManyToQueue } from "../../queue.svelte.js";
   import { isAlbumSaved, saveAlbum, removeAlbum } from "../../library.svelte.js";
-  import { openArtist } from "../../nav.svelte.js";
+  import { openArtist, openRadio } from "../../nav.svelte.js";
   import { notify } from "../../toast.svelte.js";
   import { formatDuration, coverAtLeast, releaseYear } from "../../utils.js";
   import TrackList from "../TrackList.svelte";
   import PageHeader from "../PageHeader.svelte";
   import PlayButton from "../PlayButton.svelte";
   import Icon from "../Icon.svelte";
+  import ShuffleButton from "../ShuffleButton.svelte";
+  import MoreMenu from "../MoreMenu.svelte";
 
   /** @type {{ id: string, name?: string }} */
   let { id, name = "" } = $props();
@@ -21,6 +22,7 @@
   let saveBusy = $state(false);
 
   const saved = $derived(isAlbumSaved(id));
+  const view = $derived.by(() => /** @type {import("../../nav.svelte.js").View} */ ({ type: "album", id, name: album?.name ?? name }));
 
   const totalMs = $derived.by(() => (album ? album.tracks.reduce((sum, t) => sum + t.duration_ms, 0) : 0));
   const label = $derived.by(() =>
@@ -30,7 +32,6 @@
   onMount(async () => {
     try {
       album = await api.getAlbum(id);
-      refreshLiked(album.tracks.map((t) => t.id));
     } catch (e) {
       error = `Failed to load album: ${e}`;
     }
@@ -38,8 +39,16 @@
 
   function playAll() {
     if (!album || album.tracks.length === 0) return;
-    const start = queue.shuffle ? Math.floor(Math.random() * album.tracks.length) : 0;
-    playFromList(album.tracks, start, album.name);
+    playFromList(album.tracks, -1, album.name, view);
+  }
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(`https://open.spotify.com/album/${id}`);
+      notify("Link copied");
+    } catch (e) {
+      notify(`Couldn't copy the link: ${e}`);
+    }
   }
 
   async function toggleSaved() {
@@ -87,9 +96,20 @@
       >
         <Icon name={saved ? "added" : "add-circle"} size={32} />
       </button>
+      <ShuffleButton />
+      <MoreMenu
+        label={`More options for ${album?.name}`}
+        items={[
+          { label: "Add to queue", onclick: () => album && addManyToQueue(album.tracks) },
+          { label: "Go to album radio", onclick: () => album && openRadio(`spotify:album:${id}`, album.name, coverAtLeast(album.images, 300)) },
+          null,
+          { label: saved ? "Remove from Your Library" : "Save to Your Library", onclick: toggleSaved },
+          { label: "Copy link to album", onclick: copyLink },
+        ]}
+      />
     {/snippet}
   </PageHeader>
-  <TrackList tracks={album.tracks} contextName={album.name} showAlbum={false} showCovers={false} />
+  <TrackList tracks={album.tracks} contextName={album.name} contextView={view} primary showAlbum={false} showCovers={false} />
 {/if}
 
 <style>

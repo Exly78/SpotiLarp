@@ -7,3 +7,4 @@ pub mod models;
 pub mod pathfinder;
 pub mod playlists;
 pub mod search;
+pub mod shows;
