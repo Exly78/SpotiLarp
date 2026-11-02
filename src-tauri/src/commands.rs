@@ -10,19 +10,25 @@ use crate::auth::{loopback, oauth, AUTH_SCOPES, REDIRECT_PATH, REDIRECT_PORT};
 use crate::config::{self, Settings};
 use crate::discord;
 use crate::discord::PresenceUpdate;
+use crate::discord_account;
+use crate::jam;
 use crate::local_files::{self, LocalIndex, LocalLibrary};
 use crate::lyrics::{self, LyricsResult};
 use crate::media::MediaUpdate;
 use crate::playback;
 use crate::playback::local::LocalPlayer;
 use crate::remote::{self, RemoteCommand};
+use crate::romanize;
 use crate::spotify_api::album;
 use crate::spotify_api::artist;
 use crate::spotify_api::home;
 use crate::spotify_api::library;
 use crate::spotify_api::models::{
-    Album, AlbumDetails, ArtistDetails, ArtistPage, Episode, EpisodePage, Image, Playlist, SearchResults, Show, Track,
+    Album, AlbumDetails, ArtistDetails, ArtistPage, Episode, EpisodePage, Image, NowPlayingInfo, Playlist, Profile,
+    SearchResults, Show, Track, UserProfile,
 };
+use crate::spotify_api::user_profile;
+use crate::spotify_api::now_playing;
 use crate::spotify_api::playlists;
 use crate::spotify_api::search::{self, search_tracks};
 use crate::spotify_api::shows;
@@ -82,6 +88,43 @@ pub async fn restore_session(state: State<'_, AppState>) -> Result<String, Strin
     let mut client = state.spotify.lock().await;
     let me = client.get_me().await?;
     Ok(me.display_name.unwrap_or(me.id))
+}
+
+#[tauri::command]
+pub async fn get_profile(state: State<'_, AppState>) -> Result<Profile, String> {
+    let mut client = state.spotify.lock().await;
+    let me = client.me().await?;
+    Ok(Profile {
+        name: me.display_name.unwrap_or_else(|| me.id.clone()),
+        id: me.id,
+        images: me.images.unwrap_or_default(),
+        followers: me.followers.map(|followers| followers.total),
+        country: me.country,
+        product: me.product,
+    })
+}
+
+/// Seconds until Spotify accepts SpotiLarp's requests again, if it's turning them away.
+#[tauri::command]
+pub fn rate_limit_remaining() -> Option<u64> {
+    crate::spotify_api::client::rate_limited_for().map(|wait| wait.as_secs().max(1))
+}
+
+/// A user's profile page; yours when `user_id` is left out.
+#[tauri::command]
+pub async fn get_user_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_id: Option<String>,
+) -> Result<UserProfile, String> {
+    let user_id = match user_id {
+        Some(id) => id,
+        None => state.spotify.lock().await.user_id().await?,
+    };
+    let session = spotify_session(&app, &state)
+        .await
+        .ok_or_else(|| "Profiles need playback connected".to_string())?;
+    user_profile::profile(&session, &user_id).await
 }
 
 #[tauri::command]
@@ -420,6 +463,8 @@ pub async fn play_track(
     state: State<'_, AppState>,
     uri: String,
     position_ms: Option<u32>,
+    // Loaded but not started (joining a Jam the host has paused).
+    paused: Option<bool>,
 ) -> Result<(), String> {
     if is_local_uri(&uri) {
         return play_local(&state, &uri, position_ms.unwrap_or(0)).await;
@@ -428,7 +473,7 @@ pub async fn play_track(
     set_local_active(&state, false).await;
     let playback_state = state.playback.lock().await;
     let handle = require_playback(&playback_state)?;
-    playback::player::play_uri(&handle.player, &uri, position_ms.unwrap_or(0))
+    playback::player::play_uri(&handle.player, &uri, position_ms.unwrap_or(0), !paused.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -687,6 +732,23 @@ pub async fn get_artist_page(
     }
     let mut client = state.spotify.lock().await;
     artist::basic_page(&mut client, &artist_id).await
+}
+
+/// The Now Playing panel's artist, credits, concerts and Canvas for a song.
+/// `None` without a playback session to ask (not logged in): the panel makes do
+/// with `get_artist` then.
+#[tauri::command]
+pub async fn get_now_playing_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    track_id: String,
+    artist_id: String,
+) -> Result<Option<NowPlayingInfo>, String> {
+    // Waits out a connection that's still starting up rather than missing it.
+    let Some(session) = spotify_session(&app, &state).await else {
+        return Ok(None);
+    };
+    now_playing::info(&session, &track_id, &artist_id).await.map(Some)
 }
 
 #[tauri::command]
@@ -996,6 +1058,7 @@ pub async fn get_lyrics(
     artist_name: String,
     album_name: String,
     duration_ms: u32,
+    recheck: Option<bool>,
 ) -> Result<Option<LyricsResult>, String> {
     // Only an already connected session: opening lyrics shouldn't start a login.
     let session = {
@@ -1011,7 +1074,16 @@ pub async fn get_lyrics(
         album: &album_name,
         duration_ms,
     };
-    lyrics::fetch(session, track_id.as_deref(), &query).await
+    lyrics::fetch(session, track_id.as_deref(), &query, recheck.unwrap_or(false)).await
+}
+
+/// Lyrics lines in Latin letters, one per line given (see romanize.rs).
+#[tauri::command]
+pub async fn romanize_lyrics(lines: Vec<String>) -> Result<Vec<String>, String> {
+    // The first Japanese song loads a dictionary, so it's kept off the async threads.
+    tokio::task::spawn_blocking(move || romanize::lines(&lines))
+        .await
+        .map_err(|e| format!("Couldn't romanize the lyrics: {e}"))
 }
 
 #[tauri::command]
@@ -1019,21 +1091,20 @@ pub async fn has_discord_client_id(state: State<'_, AppState>) -> Result<bool, S
     Ok(state.discord.lock().await.is_some())
 }
 
+/// Turns the Discord status on, through SpotiLarp's own Discord app.
 #[tauri::command]
-pub async fn set_discord_client_id(
-    state: State<'_, AppState>,
-    client_id: String,
-) -> Result<(), String> {
-    let client_id = client_id.trim().to_string();
-    if client_id.is_empty() {
-        return Err("Application ID can't be empty".to_string());
-    }
+pub async fn enable_discord_presence(state: State<'_, AppState>) -> Result<(), String> {
+    let client_id = discord::SPOTILARP_APP_ID.to_string();
     config::save_discord_client_id(&client_id)?;
     let mut discord = state.discord.lock().await;
     if let Some(old) = discord.take() {
         let _ = old.send(PresenceUpdate::Shutdown);
     }
-    *discord = Some(discord::spawn(client_id));
+    let sender = discord::spawn(client_id);
+    if let Some(link) = state.jam.listen_link() {
+        let _ = sender.send(PresenceUpdate::ListenLink(Some(link)));
+    }
+    *discord = Some(sender);
     Ok(())
 }
 
@@ -1045,4 +1116,68 @@ pub async fn clear_discord_client_id(state: State<'_, AppState>) -> Result<(), S
         let _ = sender.send(PresenceUpdate::Shutdown);
     }
     Ok(())
+}
+
+/// Starts hosting a Jam: the code guests join with, and the listen-along link.
+#[tauri::command]
+pub async fn jam_host(app: AppHandle) -> Result<jam::Hosted, String> {
+    jam::host(&app).await
+}
+
+/// Someone joined while the window is out of sight or in the background.
+#[tauri::command]
+pub fn jam_notify(app: AppHandle, text: String) {
+    use tauri_plugin_notification::NotificationExt;
+    let focused = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    if !focused {
+        let _ = app.notification().builder().title("SpotiLarp").body(text).show();
+    }
+}
+
+#[tauri::command]
+pub async fn jam_join(app: AppHandle, code: String) -> Result<(), String> {
+    jam::join(&app, &code).await
+}
+
+/// To one peer, or everyone without one.
+#[tauri::command]
+pub async fn jam_send(app: AppHandle, peer: Option<String>, message: serde_json::Value) -> Result<(), String> {
+    jam::send(&app, peer.as_deref(), &message).await
+}
+
+#[tauri::command]
+pub async fn jam_remove(app: AppHandle, peer: String) {
+    jam::remove(&app, &peer).await;
+}
+
+/// Leaves the Jam, or ends it when hosting.
+#[tauri::command]
+pub async fn jam_leave(app: AppHandle) {
+    jam::leave(&app).await;
+}
+
+/// The connected Discord account, if any.
+#[tauri::command]
+pub fn discord_account() -> Option<discord_account::DiscordProfile> {
+    discord_account::account()
+}
+
+/// Signs in to Discord in the browser ("Connect Discord").
+#[tauri::command]
+pub async fn connect_discord(app: AppHandle) -> Result<discord_account::DiscordProfile, String> {
+    discord_account::connect(&app).await
+}
+
+/// Asks Discord for the account again; `None` once it's been disconnected from Discord's side.
+#[tauri::command]
+pub async fn refresh_discord_account() -> Result<Option<discord_account::DiscordProfile>, String> {
+    discord_account::refresh().await
+}
+
+#[tauri::command]
+pub async fn disconnect_discord() -> Result<(), String> {
+    discord_account::disconnect().await
 }

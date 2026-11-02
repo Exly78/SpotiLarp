@@ -72,6 +72,12 @@ struct Config {
     settings: Settings,
     #[serde(default)]
     window: Option<WindowGeometry>,
+    /// Who this app is when it joins someone's Jam (jam.rs).
+    #[serde(default)]
+    jam_key: Option<String>,
+    /// The connected Discord account, as last seen (discord_account.rs).
+    #[serde(default)]
+    discord_account: Option<crate::discord_account::DiscordProfile>,
 }
 
 static SAVE_LOCK: Mutex<()> = Mutex::new(());
@@ -149,6 +155,25 @@ pub fn load_window_geometry() -> Option<WindowGeometry> {
 
 pub fn save_window_geometry(geometry: WindowGeometry) -> Result<(), String> {
     update(|config| config.window = Some(geometry))
+}
+
+pub fn load_discord_account() -> Option<crate::discord_account::DiscordProfile> {
+    load().discord_account
+}
+
+pub fn save_discord_account(account: Option<crate::discord_account::DiscordProfile>) -> Result<(), String> {
+    update(|config| config.discord_account = account)
+}
+
+pub fn load_jam_key() -> Option<[u8; 32]> {
+    use base64::Engine;
+    let key = load().jam_key?;
+    base64::engine::general_purpose::STANDARD.decode(key).ok()?.try_into().ok()
+}
+
+pub fn save_jam_key(key: &[u8; 32]) -> Result<(), String> {
+    use base64::Engine;
+    update(|config| config.jam_key = Some(base64::engine::general_purpose::STANDARD.encode(key)))
 }
 
 pub fn save_settings(settings: &Settings) -> Result<(), String> {

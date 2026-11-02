@@ -57,6 +57,13 @@
     <circle cx="12" cy="8" r="4" />
     <path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5" />
   </svg>
+{:else if name === "jam"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 20c.9-3.3 3.4-5 6.5-5s5.6 1.7 6.5 5" />
+    <circle cx="17" cy="9" r="2.6" />
+    <path d="M17.5 14.6c2.1.3 3.5 1.6 4 3.8" />
+  </svg>
 {:else if name === "window-minimize"}
   <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
     <line x1="6" y1="12" x2="18" y2="12" />

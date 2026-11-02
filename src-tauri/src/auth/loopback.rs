@@ -27,13 +27,15 @@ static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
 pub struct Listener {
     port: u16,
     path: &'static str,
+    /// Whose login it is ("Spotify", "Discord"), for the messages.
+    service: &'static str,
     server: Arc<Server>,
     cancelled: Arc<AtomicBool>,
 }
 
-pub async fn listen(port: u16, path: &'static str) -> Result<Listener, String> {
+pub async fn listen(port: u16, path: &'static str, service: &'static str) -> Result<Listener, String> {
     cancel_where(|pending| pending == port);
-    let server = Arc::new(bind(port).await?);
+    let server = Arc::new(bind(port, service).await?);
     let cancelled = Arc::new(AtomicBool::new(false));
     if let Ok(mut pending) = PENDING.lock() {
         pending.push(Pending {
@@ -45,6 +47,7 @@ pub async fn listen(port: u16, path: &'static str) -> Result<Listener, String> {
     Ok(Listener {
         port,
         path,
+        service,
         server,
         cancelled,
     })
@@ -68,7 +71,7 @@ fn cancel_where(matches: impl Fn(u16) -> bool) {
     });
 }
 
-async fn bind(port: u16) -> Result<Server, String> {
+async fn bind(port: u16, service: &str) -> Result<Server, String> {
     let mut attempt = 0;
     loop {
         match Server::http(("127.0.0.1", port)) {
@@ -79,7 +82,7 @@ async fn bind(port: u16) -> Result<Server, String> {
             }
             Err(e) => {
                 return Err(format!(
-                    "Couldn't listen for the Spotify login on port {port}, is another program using it? ({e})"
+                    "Couldn't listen for the {service} login on port {port}, is another program using it? ({e})"
                 ))
             }
         }
@@ -99,8 +102,9 @@ impl Listener {
             if self.cancelled.load(Ordering::SeqCst) {
                 return Err(LOGIN_CANCELLED.to_string());
             }
+            let service = self.service;
             let request =
-                request.ok_or_else(|| "Timed out waiting for the Spotify login, please try again".to_string())?;
+                request.ok_or_else(|| format!("Timed out waiting for the {service} login, please try again"))?;
 
             let full_url = format!("http://127.0.0.1:{}{}", self.port, request.url());
             let parsed = Url::parse(&full_url).map_err(|e| format!("failed to parse redirect URL: {e}"))?;
@@ -125,7 +129,7 @@ impl Listener {
             return match (code, state, error) {
                 (_, _, Some(error)) => {
                     respond_html(request, "Login cancelled. You can close this tab and return to the app.");
-                    Err(format!("Spotify login was not completed ({error})"))
+                    Err(format!("{} login was not completed ({error})", self.service))
                 }
                 (Some(code), Some(state), None) => {
                     respond_html(request, "Logged in. You can close this tab and return to the app.");

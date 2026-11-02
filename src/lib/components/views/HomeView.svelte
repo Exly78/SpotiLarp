@@ -12,6 +12,7 @@
   import { navigate, openArtist, openShow } from "../../nav.svelte.js";
   import { episodeTrack, continueListening, isPlayed } from "../../podcasts.svelte.js";
   import { coverAtLeast, smallestCover } from "../../utils.js";
+  import { cached, MINUTE } from "../../requestCache.js";
   import { LIKED_SONGS_ID } from "../../constants.js";
   import TrackList from "../TrackList.svelte";
   import EpisodeList from "../EpisodeList.svelte";
@@ -63,10 +64,8 @@
       return;
     }
     try {
-      const latest = await api.getLatestEpisodes(
-        shows.map((s) => s.id),
-        3,
-      );
+      const ids = shows.map((s) => s.id);
+      const latest = await cached(`latest-episodes:${ids.join(",")}`, 30 * MINUTE, () => api.getLatestEpisodes(ids, 3));
       if (key !== newEpisodesFor) return;
       const since = new Date(Date.now() - NEW_EPISODE_DAYS * 86400000).toISOString().slice(0, 10);
       newEpisodes = latest
@@ -105,19 +104,17 @@
     }
   });
 
+  // Kept a little while, so reopening the app doesn't ask for them all again.
   function load() {
-    api
-      .getRecentlyPlayed()
+    cached("recently-played", 5 * MINUTE, api.getRecentlyPlayed)
       .then((tracks) => (recent = tracks))
       .catch(() => {});
-    api
-      .getTopTracks("short_term", 20)
+    cached("top-tracks:short_term:20", 60 * MINUTE, () => api.getTopTracks("short_term", 20))
       .then((tracks) => {
         topTracks = tracks;
       })
       .catch(() => {});
-    api
-      .getTopArtists("medium_term", 12)
+    cached("top-artists:medium_term:12", 60 * MINUTE, () => api.getTopArtists("medium_term", 12))
       .then((artists) => (topArtists = artists))
       .catch(() => {});
   }

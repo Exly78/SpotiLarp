@@ -13,9 +13,16 @@ const COVER_LINK_PREFIX: &str = "https://litter.catbox.moe/";
 const UPLOAD_KEPT: &str = "72h";
 const LINK_LIFETIME: Duration = Duration::from_secs(70 * 60 * 60);
 const UPLOAD_RETRY: Duration = Duration::from_secs(120);
+/// SpotiLarp's Discord app: the status says "Listening to SpotiLarp", and
+/// Connect Discord signs in through it. An app ID is public, not a secret.
+pub const SPOTILARP_APP_ID: &str = "1539761294515773562";
+const SPOTIFY_WEB: &str = "https://open.spotify.com/";
+/// Where the "Get SpotiLarp" button leads: the newest installer.
+const DOWNLOAD_URL: &str = "https://github.com/Exly78/SpotiLarp/releases/latest";
 
 static FAILED_UPLOADS: Mutex<Vec<(PathBuf, Instant)>> = Mutex::new(Vec::new());
 
+#[derive(Clone)]
 pub enum PresenceUpdate {
     Playing {
         name: String,
@@ -34,6 +41,8 @@ pub enum PresenceUpdate {
         track_url: Option<String>,
     },
     Cleared,
+    /// Where friends listen along (jam.rs), or `None` to drop the button.
+    ListenLink(Option<String>),
 
     Shutdown,
 }
@@ -43,26 +52,53 @@ pub fn spawn(client_id: String) -> Sender<PresenceUpdate> {
     std::thread::spawn(move || {
         let mut client = DiscordIpcClient::new(&client_id);
         let mut connected = client.connect().is_ok();
+        let mut listen_link: Option<String> = None;
+        // What's showing, and since when, to show again with the button changed.
+        let mut last: Option<(PresenceUpdate, Instant)> = None;
         while let Ok(update) = rx.recv() {
-            if matches!(update, PresenceUpdate::Shutdown) {
-                if connected {
-                    let _ = client.close();
+            let update = match update {
+                PresenceUpdate::Shutdown => {
+                    if connected {
+                        let _ = client.close();
+                    }
+                    return;
                 }
-                return;
-            }
+                PresenceUpdate::ListenLink(link) => {
+                    listen_link = link;
+                    match &last {
+                        Some((shown, since)) => moved_on(shown, since.elapsed()),
+                        None => continue,
+                    }
+                }
+                update => {
+                    last = Some((update.clone(), Instant::now()));
+                    update
+                }
+            };
             if !connected {
                 connected = client.connect().is_ok();
                 if !connected {
                     continue;
                 }
             }
-            if apply(&mut client, &update).is_err() {
+            let link = listen_link.as_deref();
+            if apply(&mut client, &update, link).is_err() {
                 let _ = client.close();
-                connected = client.connect().is_ok() && apply(&mut client, &update).is_ok();
+                connected = client.connect().is_ok() && apply(&mut client, &update, link).is_ok();
             }
         }
     });
     tx
+}
+
+/// A status as it is `elapsed` after it was set: a playing song has moved on.
+fn moved_on(update: &PresenceUpdate, elapsed: Duration) -> PresenceUpdate {
+    let mut update = update.clone();
+    if let PresenceUpdate::Playing { position_ms, duration_ms, .. } = &mut update {
+        let elapsed = u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX);
+        *position_ms = position_ms.saturating_add(elapsed).min(*duration_ms);
+    }
+    update
 }
 
 fn discord_text(text: &str) -> String {
@@ -162,16 +198,36 @@ fn cover_assets<'a>(album: &'a Option<String>, cover_url: &'a Option<String>) ->
     assets
 }
 
-fn listen_buttons(track_url: &Option<String>) -> Vec<activity::Button<'_>> {
-    track_url
-        .iter()
-        .map(|url| activity::Button::new("Listen on Spotify", url))
+/// A Spotify song (one with a link) gets a button to listen: with a
+/// listen-along session open it opens SpotiLarp instead of Spotify, and the
+/// page it lands on (docs/listen) still offers the song on Spotify to anyone
+/// without SpotiLarp. "Get SpotiLarp" comes second, always.
+fn listen_buttons<'a>(track_url: &'a Option<String>, listen_link: Option<&'a str>) -> Vec<activity::Button<'a>> {
+    let listen = track_url.as_deref().map(|track_url| match listen_link {
+        Some(link) => activity::Button::new("Listen along on SpotiLarp", listen_along_url(link, track_url)),
+        None => activity::Button::new("Listen on Spotify", track_url),
+    });
+    listen
+        .into_iter()
+        .chain(std::iter::once(activity::Button::new("Get SpotiLarp", DOWNLOAD_URL)))
         .collect()
 }
 
-fn apply(client: &mut DiscordIpcClient, update: &PresenceUpdate) -> Result<(), Box<dyn std::error::Error>> {
+/// The listen-along link with the song after the code: "...#<code>/track/<id>".
+fn listen_along_url(link: &str, track_url: &str) -> String {
+    match track_url.strip_prefix(SPOTIFY_WEB) {
+        Some(song) => format!("{link}/{song}"),
+        None => link.to_string(),
+    }
+}
+
+fn apply(
+    client: &mut DiscordIpcClient,
+    update: &PresenceUpdate,
+    listen_link: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     match update {
-        PresenceUpdate::Cleared | PresenceUpdate::Shutdown => client.clear_activity()?,
+        PresenceUpdate::Cleared | PresenceUpdate::ListenLink(_) | PresenceUpdate::Shutdown => client.clear_activity()?,
         PresenceUpdate::Playing {
             name,
             artists,
@@ -198,7 +254,7 @@ fn apply(client: &mut DiscordIpcClient, update: &PresenceUpdate) -> Result<(), B
                 .state(&artists)
                 .assets(assets)
                 .timestamps(activity::Timestamps::new().start(start).end(end))
-                .buttons(listen_buttons(track_url));
+                .buttons(listen_buttons(track_url, listen_link));
             client.set_activity(payload)?
         }
         PresenceUpdate::Paused {
@@ -218,9 +274,24 @@ fn apply(client: &mut DiscordIpcClient, update: &PresenceUpdate) -> Result<(), B
                 .details(&name)
                 .state(&state)
                 .assets(assets)
-                .buttons(listen_buttons(track_url));
+                .buttons(listen_buttons(track_url, listen_link));
             client.set_activity(payload)?
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn listen_along_links_carry_the_song() {
+        let link = "https://exly78.github.io/SpotiLarp/listen/#abc";
+        assert_eq!(
+            listen_along_url(link, "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"),
+            "https://exly78.github.io/SpotiLarp/listen/#abc/track/4uLU6hMCjMI75M1A2tKUQC"
+        );
+        assert_eq!(listen_along_url(link, "https://example.com/x"), link);
+    }
 }

@@ -15,6 +15,7 @@
   import { navigate, openArtist, openAlbum, openShow } from "../nav.svelte.js";
   import { isEpisodeUri } from "../podcasts.svelte.js";
   import { sleep } from "../sleep.svelte.js";
+  import { jam } from "../jam.svelte.js";
   import { formatTime } from "../utils.js";
   import Icon from "./Icon.svelte";
 
@@ -22,8 +23,8 @@
   /** How far the podcast buttons skip. */
   const EPISODE_SKIP_MS = 15_000;
 
-  /** @type {{ queueOpen?: boolean, onToggleQueue?: () => void, onMiniMode?: () => void }} */
-  let { queueOpen = false, onToggleQueue, onMiniMode } = $props();
+  /** @type {{ queueOpen?: boolean, onToggleQueue?: () => void, jamOpen?: boolean, onToggleJam?: () => void, onMiniMode?: () => void }} */
+  let { queueOpen = false, onToggleQueue, jamOpen = false, onToggleJam, onMiniMode } = $props();
 
   let volumeHoverPct = $state(-1);
   let seekHoverPct = $state(-1);
@@ -226,6 +227,18 @@
     {/if}
     <button
       type="button"
+      class="icon-button toggle-button jam-button"
+      class:active={jamOpen || jam.role !== null}
+      class:live={jam.role !== null}
+      onclick={onToggleJam}
+      aria-label={jamOpen ? "Hide Jam" : "Show Jam"}
+      aria-pressed={jamOpen}
+      title={jam.role === "host" ? `Your Jam: ${jam.members.length} listening (J)` : jam.role === "guest" ? `In ${jam.hostName || "a"} Jam (J)` : "Jam: listen with friends (J)"}
+    >
+      <Icon name="jam" size={17} />
+    </button>
+    <button
+      type="button"
       class="icon-button toggle-button queue-button"
       class:active={queueOpen}
       onclick={onToggleQueue}
@@ -397,8 +410,22 @@
 }
 .mute-button,
 .queue-button,
+.jam-button,
 .side-button {
   flex-shrink: 0;
+}
+.jam-button {
+  position: relative;
+}
+.jam-button.live::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 .link {
   padding: 0;

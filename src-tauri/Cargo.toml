@@ -1,6 +1,6 @@
 [package]
 name = "spotilarp"
-version = "1.1.0"
+version = "1.2.0"
 description = "A low-RAM Spotify client built with Rust + Tauri"
 authors = ["Exly"]
 edition = "2021"
@@ -56,6 +56,12 @@ librespot-playback = { version = "0.8.0", default-features = false, features = [
 # Discord Rich Presence over the local IPC pipe, talks directly to the
 # already-running Discord client, no network/HTTP client of its own.
 discord-rich-presence = "1"
+# Romanized lyrics (romanize.rs). The Japanese dictionary is built into the
+# binary; its build step downloads IPADIC from lindera.dev once per clean build.
+lindera = { version = "6.2.0", default-features = false, features = ["embed-ipadic"] }
+wana_kana = "5.0.0"
+any_ascii = "0.3.3"
+pinyin = { version = "0.11.0", default-features = false, features = ["with_tone"] }
 # OS media controls: media keys, headset buttons and the Windows media
 # overlay (SMTC). zbus instead of the default dbus so Linux builds need no
 # system dbus headers.
@@ -65,10 +71,16 @@ tauri-plugin-process = "2.3.1"
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+# Opens spotilarp://listen/<code> links (the "Listen along" button on Discord).
+tauri-plugin-deep-link = "2.6.3"
 # Native folder picker for choosing local music folders (used from Rust only).
 tauri-plugin-dialog = "2"
 # Reads tags and embedded art from local files (the same symphonia rodio decodes them with).
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "isomp4", "aac", "alac", "ogg", "vorbis", "wav", "pcm"] }
+# Jams (jam.rs): listening together, connected straight to each other by
+# public key, with n0's public relays as the fallback when routers won't allow
+# a direct path. No metrics: nothing reads them.
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
 
 # Taskbar thumbnail buttons (thumbbar.rs); the same windows crate Tauri already uses.
 [target.'cfg(windows)'.dependencies]

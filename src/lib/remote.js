@@ -6,6 +6,7 @@ import { toggleLike } from "./likes.svelte.js";
 import { navigate } from "./nav.svelte.js";
 import { openSpotifyLink } from "./openLink.js";
 import { resetTheme } from "./themes.svelte.js";
+import { listenAlong } from "./jam.svelte.js";
 
 /**
  * Acts on `spotilarp <verb>` from the command line (see remote.rs).
@@ -62,6 +63,9 @@ export function runRemoteCommand(command) {
       break;
     case "reset_theme":
       resetTheme();
+      break;
+    case "listen_along":
+      listenAlong(command.code);
       break;
   }
 }

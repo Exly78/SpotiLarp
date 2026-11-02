@@ -16,6 +16,7 @@
   import { openTrackMenu } from "../contextMenu.svelte.js";
   import { smallestCover } from "../utils.js";
   import { navigate } from "../nav.svelte.js";
+  import { jam } from "../jam.svelte.js";
   import RecentList from "./RecentList.svelte";
 
   /** @typedef {import("../types.js").Track} Track */
@@ -74,7 +75,8 @@
   }
 </script>
 
-{#snippet row(/** @type {Track} */ track, /** @type {boolean} */ playing)}
+{#snippet row(/** @type {Track} */ track, /** @type {boolean} */ playing, /** @type {string|undefined} */ by = undefined)}
+  {@const addedBy = by ?? track.addedBy}
   {#if smallestCover(track.album.images)}
     <img src={smallestCover(track.album.images)} alt="" class="thumb" loading="lazy" />
   {:else}
@@ -82,7 +84,7 @@
   {/if}
   <div class="meta">
     <div class="name" class:playing>{track.name}</div>
-    <div class="artists">{track.artists.map((a) => a.name).join(", ")}</div>
+    <div class="artists">{track.artists.map((a) => a.name).join(", ")}{#if addedBy} · Added by {addedBy}{/if}</div>
   </div>
 {/snippet}
 
@@ -113,6 +115,30 @@
     <section>
       <RecentList />
     </section>
+  {:else if jam.role === "guest"}
+    <section>
+      <h3>Now playing</h3>
+      <div class="playing-from">Playing in {jam.hostName || "the host"}'s Jam</div>
+      {#if jam.nowPlaying}
+        {@const track = jam.nowPlaying}
+        <div class="row static" role="presentation" oncontextmenu={(e) => openTrackMenu(e, track)}>
+          {@render row(track, true)}
+        </div>
+      {:else}
+        <div class="empty">Nothing's playing in the Jam right now.</div>
+      {/if}
+    </section>
+
+    {#if jam.upNext.length > 0}
+      <section>
+        <h3>Next in the Jam</h3>
+        {#each jam.upNext as { track, by }, i (i)}
+          <div class="row static" role="presentation" oncontextmenu={(e) => openTrackMenu(e, track)}>
+            {@render row(track, false, by)}
+          </div>
+        {/each}
+      </section>
+    {/if}
   {:else if !queue.current}
     <div class="empty">Nothing in the queue yet. Right-click a song and pick "Add to queue".</div>
   {:else}

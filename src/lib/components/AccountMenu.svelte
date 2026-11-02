@@ -1,8 +1,8 @@
 <script>
   import Icon from "./Icon.svelte";
 
-  /** @type {{ initial: string, label: string, children: import("svelte").Snippet }} */
-  let { initial, label, children } = $props();
+  /** @type {{ initial: string, label: string, imageUrl?: string|null, children: import("svelte").Snippet }} */
+  let { initial, label, imageUrl = null, children } = $props();
 
   let open = $state(false);
   /** @type {HTMLDivElement|undefined} */
@@ -36,7 +36,9 @@
     aria-expanded={open}
     title={label}
   >
-    {#if initial}
+    {#if imageUrl}
+      <img src={imageUrl} alt="" class="avatar-image" />
+    {:else if initial}
       {initial}
     {:else}
       <Icon name="user" size={18} />
@@ -76,6 +78,12 @@
   background: var(--surface-hover);
   transform: scale(1.05);
 }
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
 .popover {
   position: absolute;
   top: calc(100% + 0.5em);
@@ -84,7 +92,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.6em;
-  min-width: 220px;
+  min-width: 260px;
   padding: 1em;
   border-radius: var(--radius-md);
   background: var(--surface-raised);

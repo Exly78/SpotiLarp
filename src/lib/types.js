@@ -81,6 +81,7 @@
  * @property {string|null} [release_date] episodes only
  * @property {string} [description] episodes only
  * @property {boolean} [playable] episodes only: false when Spotify won't play it here
+ * @property {string} [addedBy] who asked for it, in a Jam
  */
 
 /**
@@ -121,6 +122,87 @@
  * @typedef {Object} ExternalLink
  * @property {string} name
  * @property {string} url
+ */
+
+/**
+ * Your Spotify account, for the account menu.
+ * @typedef {Object} Profile
+ * @property {string} id
+ * @property {string} name
+ * @property {Image[]} images
+ * @property {number|null} followers
+ * @property {string|null} country two letters, e.g. "GB"
+ * @property {string|null} product "premium" or "free"
+ */
+
+/**
+ * A user's profile page.
+ * @typedef {Object} UserProfile
+ * @property {string} id
+ * @property {string} name
+ * @property {string|null} image
+ * @property {string|null} color "#rrggbb"
+ * @property {number} followers
+ * @property {number} following
+ * @property {number} playlist_count
+ * @property {boolean} is_current_user
+ * @property {ProfilePlaylist[]} playlists
+ * @property {ProfileEntry[]} recently_played_artists
+ * @property {ProfileEntry[]} followers_list
+ * @property {ProfileEntry[]} following_list
+ */
+
+/**
+ * An artist or user in a profile's lists.
+ * @typedef {Object} ProfileEntry
+ * @property {"artist"|"user"} kind
+ * @property {string} id
+ * @property {string} name
+ * @property {string|null} image
+ * @property {number|null} followers
+ */
+
+/**
+ * @typedef {Object} ProfilePlaylist
+ * @property {string} id
+ * @property {string} name
+ * @property {string[]} images one cover, or the four of a mosaic
+ * @property {string|null} owner
+ */
+
+/**
+ * What Spotify's Now Playing view shows beside a song. `artist` is only the
+ * "About" half of an ArtistPage (no releases).
+ * @typedef {Object} NowPlayingInfo
+ * @property {ArtistPage} artist
+ * @property {Credit[]} credits
+ * @property {string[]} credit_sources
+ * @property {Concert[]} concerts
+ * @property {number} concert_count
+ * @property {Canvas|null} canvas
+ */
+
+/**
+ * @typedef {Object} Credit
+ * @property {string} name
+ * @property {string[]} roles
+ * @property {string|null} artist_id
+ */
+
+/**
+ * @typedef {Object} Concert
+ * @property {string} id
+ * @property {string} title
+ * @property {string} date in the venue's time, like "2026-11-04T20:30+08:00"
+ * @property {string} venue
+ * @property {string} city
+ * @property {boolean} festival
+ */
+
+/**
+ * @typedef {Object} Canvas
+ * @property {string} url
+ * @property {boolean} is_video
  */
 
 /**
@@ -230,7 +312,8 @@
  *   | { action: "seek_by", seconds: number }
  *   | { action: "seek_to", seconds: number }
  *   | { action: "open", link: string }
- *   | { action: "search", query: string }} RemoteCommand
+ *   | { action: "search", query: string }
+ *   | { action: "listen_along", code: string }} RemoteCommand
  */
 
 /**

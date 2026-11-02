@@ -3,12 +3,15 @@ mod background;
 mod commands;
 mod config;
 mod discord;
+mod discord_account;
 mod http;
+mod jam;
 mod local_files;
 mod lyrics;
 mod media;
 mod playback;
 mod remote;
+mod romanize;
 mod spotify_api;
 mod state;
 mod themes;
@@ -23,6 +26,9 @@ use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 const MINIMIZED_ARG: &str = "--minimized";
+/// Set (in a debug build) to open another copy beside the one already
+/// running, for trying a Jam alone.
+const SECOND_COPY_VAR: &str = "SPOTILARP_SECOND_COPY";
 
 #[cfg(target_os = "windows")]
 fn main_window_handle(app: &tauri::App) -> Option<isize> {
@@ -32,6 +38,13 @@ fn main_window_handle(app: &tauri::App) -> Option<isize> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let second_copy = cfg!(debug_assertions) && std::env::var_os(SECOND_COPY_VAR).is_some();
+    if second_copy {
+        // Its own WebView2 profile, so the page's storage (queue, volume, Jam
+        // name) stays apart from the first copy's.
+        let folder = dirs::data_local_dir().unwrap_or_default().join("SpotiLarp-second-copy");
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", folder);
+    }
 
     let client_id = config::load_client_id();
 
@@ -40,11 +53,17 @@ pub fn run() {
     let launch_command = remote::parse(&std::env::args().collect::<Vec<_>>());
     commands::apply_audio_settings(&settings);
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match remote::parse(&args) {
+    let builder = tauri::Builder::default();
+    let builder = if second_copy {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| match remote::parse(&args) {
             Some(command) => remote::dispatch(app, command),
             None => tray::show_main_window(app),
         }))
+    };
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -70,12 +89,35 @@ pub fn run() {
             pending_commands: std::sync::Mutex::new(launch_command.into_iter().collect()),
             background: std::sync::atomic::AtomicBool::new(false),
             clock_generation: std::sync::atomic::AtomicU64::new(0),
+            jam: Default::default(),
         })
         .register_uri_scheme_protocol(local_files::COVER_SCHEME, |_ctx, request| {
             local_files::serve_cover(&request)
         })
         .register_uri_scheme_protocol(themes::THEME_SCHEME, |_ctx, request| themes::serve(&request))
-        .setup(|app| {
+        .setup(move |app| {
+            // spotilarp:// links (Discord's "Listen along") open this copy. On
+            // Windows and Linux they arrive as the launch argument (remote.rs).
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                #[cfg(any(windows, target_os = "linux"))]
+                if !second_copy {
+                    let _ = app.deep_link().register_all();
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let handle = app.handle().clone();
+                    app.deep_link().on_open_url(move |event| {
+                        for url in event.urls() {
+                            let args = [String::new(), url.to_string()];
+                            if let Some(command) = remote::parse(&args) {
+                                remote::dispatch(&handle, command);
+                            }
+                        }
+                    });
+                }
+            }
+
             #[cfg(target_os = "windows")]
             let hwnd = main_window_handle(app);
             #[cfg(target_os = "windows")]
@@ -147,6 +189,9 @@ pub fn run() {
             commands::cancel_login,
             commands::login_status,
             commands::restore_session,
+            commands::get_profile,
+            commands::get_user_profile,
+            commands::rate_limit_remaining,
             commands::logout,
             commands::has_connect_session,
             commands::connect_playback,
@@ -164,6 +209,7 @@ pub fn run() {
             commands::search_all,
             commands::search_tracks_page,
             commands::get_artist_page,
+            commands::get_now_playing_info,
             commands::get_artist_discography,
             commands::get_album,
             commands::get_saved_albums,
@@ -200,8 +246,9 @@ pub fn run() {
             commands::seek,
             commands::set_volume,
             commands::get_lyrics,
+            commands::romanize_lyrics,
             commands::has_discord_client_id,
-            commands::set_discord_client_id,
+            commands::enable_discord_presence,
             commands::clear_discord_client_id,
             commands::get_settings,
             commands::set_settings,
@@ -223,7 +270,17 @@ pub fn run() {
             commands::list_themes,
             commands::get_theme,
             commands::import_themes,
-            commands::open_themes_folder
+            commands::open_themes_folder,
+            commands::discord_account,
+            commands::connect_discord,
+            commands::refresh_discord_account,
+            commands::disconnect_discord,
+            commands::jam_host,
+            commands::jam_notify,
+            commands::jam_join,
+            commands::jam_send,
+            commands::jam_remove,
+            commands::jam_leave
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

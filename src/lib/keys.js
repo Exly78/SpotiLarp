@@ -19,6 +19,7 @@ export const SHORTCUTS = [
   ["S or Ctrl+S", "Shuffle: off, on, smart (spreads artists out, plays recent songs last)"],
   ["R or Ctrl+R", "Repeat"],
   ["Q", "Show / hide the queue"],
+  ["J", "Show / hide the Jam (listening with friends)"],
   ["L", "Show / hide lyrics"],
   ["F", "Full-screen lyrics (Esc leaves)"],
   ["Ctrl+F or /", "Search (paste a Spotify link and press Enter to open it)"],

@@ -7,6 +7,7 @@
  *   | { type: "search", query: string }
  *   | { type: "radio", seed: string, name: string, image?: string|null }
  *   | { type: "show", id: string, name?: string }
+ *   | { type: "profile", id: string, name?: string }
  *   | { type: "stats" }
  *   | { type: "local" }
  *   | { type: "settings" }} View
@@ -26,6 +27,7 @@ export function viewKey(view) {
     case "album":
     case "discography":
     case "show":
+    case "profile":
       return `${view.type}:${view.id}`;
     case "search":
       return `search:${view.query}`;
@@ -100,6 +102,11 @@ export function openRadio(seed, name, image = null) {
  */
 export function openDiscography(artist, group = "all") {
   navigate({ type: "discography", id: artist.id, name: artist.name, group });
+}
+
+/** @param {{ id: string, name?: string }} user */
+export function openProfile(user) {
+  if (user.id) navigate({ type: "profile", id: user.id, name: user.name });
 }
 
 /** @param {import("./types.js").PlaylistCard} card */

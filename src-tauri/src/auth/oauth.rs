@@ -57,7 +57,7 @@ pub async fn browser_login(
         url.query_pairs_mut().append_pair("show_dialog", "true");
     }
 
-    let listener = loopback::listen(port, path).await?;
+    let listener = loopback::listen(port, path, "Spotify").await?;
     app.opener()
         .open_url(url.as_str(), None::<&str>)
         .map_err(|e| format!("failed to open browser: {e}"))?;

@@ -184,6 +184,96 @@ pub struct ExternalLink {
     pub url: String,
 }
 
+/// Your Spotify account, for the account menu.
+#[derive(Serialize)]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    pub images: Vec<Image>,
+    pub followers: Option<u32>,
+    /// Two letters, e.g. "GB".
+    pub country: Option<String>,
+    /// "premium" or "free".
+    pub product: Option<String>,
+}
+
+/// A user's profile page.
+#[derive(Serialize)]
+pub struct UserProfile {
+    pub id: String,
+    pub name: String,
+    pub image: Option<String>,
+    /// The colour Spotify picked for the page, as "#rrggbb".
+    pub color: Option<String>,
+    pub followers: u64,
+    pub following: u64,
+    pub playlist_count: u64,
+    pub is_current_user: bool,
+    pub playlists: Vec<ProfilePlaylist>,
+    pub recently_played_artists: Vec<ProfileEntry>,
+    pub followers_list: Vec<ProfileEntry>,
+    pub following_list: Vec<ProfileEntry>,
+}
+
+/// An artist or user in a profile's lists.
+#[derive(Serialize)]
+pub struct ProfileEntry {
+    /// "artist" or "user".
+    pub kind: &'static str,
+    pub id: String,
+    pub name: String,
+    pub image: Option<String>,
+    pub followers: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct ProfilePlaylist {
+    pub id: String,
+    pub name: String,
+    /// One cover, or the four of a mosaic.
+    pub images: Vec<String>,
+    pub owner: Option<String>,
+}
+
+/// What Spotify's Now Playing view shows beside a song.
+#[derive(Serialize)]
+pub struct NowPlayingInfo {
+    /// Only the "About" half: no releases.
+    pub artist: ArtistPage,
+    pub credits: Vec<Credit>,
+    /// Where the credits came from (labels, distributors).
+    pub credit_sources: Vec<String>,
+    pub concerts: Vec<Concert>,
+    pub concert_count: u64,
+    pub canvas: Option<Canvas>,
+}
+
+/// One person on a song, with every role they had on it.
+#[derive(Serialize)]
+pub struct Credit {
+    pub name: String,
+    pub roles: Vec<String>,
+    pub artist_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Concert {
+    pub id: String,
+    pub title: String,
+    /// As Spotify sends it, in the venue's time: "2026-11-04T20:30+08:00".
+    pub date: String,
+    pub venue: String,
+    pub city: String,
+    pub festival: bool,
+}
+
+/// The short looping video (or image) Spotify shows instead of the cover.
+#[derive(Serialize)]
+pub struct Canvas {
+    pub url: String,
+    pub is_video: bool,
+}
+
 #[derive(Serialize)]
 pub struct PlaylistCard {
     pub id: String,

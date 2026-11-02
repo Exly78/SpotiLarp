@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::config::Settings;
 use crate::discord::PresenceUpdate;
+use crate::jam::JamState;
 use crate::local_files::LocalIndex;
 use crate::media::MediaUpdate;
 use crate::playback::events::EventSender;
@@ -49,6 +50,8 @@ pub struct AppState {
     pub background: AtomicBool,
     /// Which run of the page's clock is current (background.rs).
     pub clock_generation: std::sync::atomic::AtomicU64,
+    /// The Jam being hosted or listened in on (jam.rs).
+    pub jam: JamState,
 }
 
 impl AppState {

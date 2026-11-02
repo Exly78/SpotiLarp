@@ -1,11 +1,12 @@
 <script>
   import * as api from "../api.js";
+  import { setDiscordSharing } from "../jam.svelte.js";
+  import { discordAccount, connectDiscord, cancelConnectDiscord, disconnectDiscord } from "../discordAccount.svelte.js";
   import Icon from "./Icon.svelte";
 
   /** @type {boolean|null} */
   let enabled = $state(null);
   let open = $state(false);
-  let clientId = $state("");
   let saving = $state(false);
   let error = $state("");
   /** @type {HTMLDivElement|undefined} */
@@ -20,15 +21,14 @@
     error = "";
   }
 
-  async function save() {
-    if (!clientId.trim() || saving) return;
+  async function enable() {
+    if (saving) return;
     saving = true;
     error = "";
     try {
-      await api.setDiscordClientId(clientId);
+      await api.enableDiscordPresence();
       enabled = true;
-      clientId = "";
-      open = false;
+      setDiscordSharing(true);
     } catch (e) {
       error = `${e}`;
     } finally {
@@ -42,6 +42,7 @@
     try {
       await api.clearDiscordClientId();
       enabled = false;
+      setDiscordSharing(false);
     } catch (e) {
       error = `${e}`;
     } finally {
@@ -51,7 +52,6 @@
 
   /** @param {KeyboardEvent} evt */
   function onKeydown(evt) {
-    if (evt.key === "Enter") save();
     if (evt.key === "Escape") open = false;
   }
 
@@ -61,7 +61,7 @@
   }
 </script>
 
-<svelte:window onclick={onWindowClick} />
+<svelte:window onclick={onWindowClick} onkeydown={(e) => open && onKeydown(e)} />
 
 <div class="discord-settings" bind:this={root} data-tauri-drag-region="false">
   <button
@@ -77,8 +77,35 @@
 
   {#if open}
     <div class="popover">
+      <div class="account">
+        {#if discordAccount.profile}
+          {@const profile = discordAccount.profile}
+          <img src={profile.avatar_url} alt="" class="avatar" />
+          <div class="who">
+            <div class="name">{profile.name}</div>
+            <div class="handle">@{profile.username}</div>
+          </div>
+          <button type="button" class="text-button" onclick={disconnectDiscord}>Disconnect</button>
+        {:else if discordAccount.connecting}
+          <span class="waiting">Finish connecting in your browser...</span>
+          <button type="button" class="text-button" onclick={cancelConnectDiscord}>Cancel</button>
+        {:else}
+          <button type="button" class="connect-button" onclick={connectDiscord}>
+            <Icon name="discord" size={16} />
+            Connect Discord
+          </button>
+        {/if}
+      </div>
+      {#if !discordAccount.profile && !discordAccount.connecting}
+        <p class="hint">Links your Discord account to SpotiLarp, for the Discord features on the way.</p>
+      {/if}
+      <div class="divider"></div>
       {#if enabled}
-        <p class="intro">Discord Rich Presence is on, your listening activity shows on your profile.</p>
+        <p class="intro">
+          Discord Rich Presence is on, your listening activity shows on your profile. Friends get a
+          <strong>Listen along</strong> button to hear the same songs in their SpotiLarp.
+        </p>
+        <p class="intro">Discord only shows the buttons to other people, not on your own profile.</p>
         {#if error}
           <p class="error">{error}</p>
         {/if}
@@ -87,29 +114,14 @@
         </button>
       {:else}
         <p class="intro">
-          Show what you're listening to on your Discord profile. Needs a free Discord application,
-          takes about 30 seconds.
+          Show what you're listening to on your Discord profile, with a <strong>Listen along</strong>
+          button so friends can hear the same songs in their SpotiLarp. Needs the Discord app running.
         </p>
-        <ol class="steps">
-          <li>Go to <span class="mono">discord.com/developers/applications</span> and log in.</li>
-          <li>Click <strong>New Application</strong>, give it any name.</li>
-          <li>Copy the <strong>Application ID</strong> from the app's General Information page.</li>
-        </ol>
-        <input
-          type="text"
-          placeholder="Application ID"
-          bind:value={clientId}
-          onkeydown={onKeydown}
-          disabled={saving}
-          class="client-id-input"
-          autocomplete="off"
-          spellcheck="false"
-        />
         {#if error}
           <p class="error">{error}</p>
         {/if}
-        <button type="button" onclick={save} disabled={saving || !clientId.trim()} class="save-button">
-          {saving ? "Saving..." : "Enable"}
+        <button type="button" onclick={enable} disabled={saving} class="save-button">
+          {saving ? "Turning on..." : "Show on Discord"}
         </button>
       {/if}
     </div>
@@ -140,38 +152,89 @@
   color: var(--text-dim);
   line-height: 1.5;
 }
-.steps {
-  margin: 0;
-  padding-left: 1.2em;
+.account {
   display: flex;
-  flex-direction: column;
-  gap: 0.5em;
+  align-items: center;
+  gap: 0.7em;
+  min-height: 36px;
+}
+.avatar {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--control-bg);
+}
+.who {
+  flex: 1;
+  min-width: 0;
+}
+.name,
+.handle {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--text);
+}
+.handle {
   font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.waiting {
+  flex: 1;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
+}
+.connect-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  width: 100%;
+  padding: 0.55em 1em;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: #5865f2;
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  transition: background-color var(--transition), transform 100ms ease;
+}
+.connect-button:hover {
+  background: #4752c4;
+  transform: scale(1.02);
+}
+.hint {
+  margin: -0.3em 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
   line-height: 1.5;
 }
-.mono {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.9em;
-  color: var(--text);
-}
-.client-id-input {
-  width: 100%;
-  padding: 0.6em 0.8em;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
-  background: var(--control-bg);
-  color: var(--text);
-  font-size: var(--fs-sm);
-  font-family: inherit;
-  outline: none;
-  transition: border-color var(--transition);
-}
-.client-id-input:focus {
-  border-color: var(--accent);
-}
-.client-id-input::placeholder {
+.text-button {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+}
+.text-button:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+.divider {
+  height: 1px;
+  background: var(--border);
 }
 .error {
   margin: 0;

@@ -461,7 +461,7 @@
       <button
         type="button"
         class="refresh"
-        onclick={loadLibrary}
+        onclick={() => loadLibrary({ force: true })}
         disabled={library.loading || !loggedIn}
         aria-label="Refresh library"
         title="Refresh library"

@@ -1,13 +1,15 @@
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use super::models::Page;
+use super::models::{Followers, Image, Page};
 use crate::auth::oauth::{self, AuthorizationCode, RefreshError, TokenResponse, LOGIN_EXPIRED};
 use crate::auth::{token_store, AUTH_SCOPES};
 
@@ -19,13 +21,23 @@ const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
 const MAX_ERROR_BODY_CHARS: usize = 300;
 /// How long to hold off when Spotify says to slow down without saying for how long.
 const DEFAULT_RATE_LIMIT_PAUSE: Duration = Duration::from_secs(30);
+/// Spotify counts an app's requests over a rolling 30 seconds. Past its limit
+/// it refuses them, and pushed further it refuses everything for hours, so a
+/// burst bigger than this (a quick relaunch, a huge playlist) is spread out
+/// instead of sent at once.
+const PACE_WINDOW: Duration = Duration::from_secs(30);
+const PACE_LIMIT: usize = 40;
 
 /// The start of the error for requests Spotify turned away for coming too
 /// often (the page checks for it).
 pub const RATE_LIMITED: &str = "Spotify is limiting how often SpotiLarp can ask it things";
 
 /// Until when Spotify asked for no more requests: asking anyway only makes the wait longer.
+/// Kept on disk too (see `saved_limit_path`), so restarting doesn't ask again early.
 static RATE_LIMITED_UNTIL: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+static SAVED_LIMIT_READ: std::sync::Once = std::sync::Once::new();
+/// When the most recent requests went out, for `pace`.
+static RECENT_REQUESTS: std::sync::Mutex<VecDeque<Instant>> = std::sync::Mutex::new(VecDeque::new());
 
 enum RequestError {
     Unauthorized,
@@ -41,10 +53,20 @@ impl From<RequestError> for String {
     }
 }
 
-#[derive(Deserialize)]
+/// You, as `/me` describes you. `country` and `product` come with the
+/// user-read-private scope.
+#[derive(Clone, Deserialize)]
 pub struct Me {
     pub display_name: Option<String>,
     pub id: String,
+    #[serde(default)]
+    pub images: Option<Vec<Image>>,
+    #[serde(default)]
+    pub followers: Option<Followers>,
+    #[serde(default)]
+    pub country: Option<String>,
+    #[serde(default)]
+    pub product: Option<String>,
 }
 
 pub struct SpotifyClient {
@@ -55,6 +77,8 @@ pub struct SpotifyClient {
     refresh_token: Option<String>,
     granted_scopes: Option<String>,
     user_id: Option<String>,
+    /// The last `/me`, so the account menu doesn't ask for it again.
+    me: Option<Me>,
 }
 
 impl SpotifyClient {
@@ -67,6 +91,7 @@ impl SpotifyClient {
             refresh_token: token_store::load_refresh_token(),
             granted_scopes: None,
             user_id: None,
+            me: None,
         }
     }
 
@@ -89,7 +114,8 @@ impl SpotifyClient {
             .is_some_and(|current| current != client_id);
         self.client_id = Some(client_id);
         if changed {
-            // Spotify's limit was on the old app; the new one hasn't asked for anything yet.
+            // The new app may have its own allowance; asking once finds out (and a
+            // refusal saves the wait again).
             clear_rate_limit();
             self.logout()?;
         }
@@ -108,6 +134,7 @@ impl SpotifyClient {
         self.refresh_token = None;
         self.granted_scopes = None;
         self.user_id = None;
+        self.me = None;
         token_store::clear_refresh_token()
     }
 
@@ -173,7 +200,16 @@ impl SpotifyClient {
     pub async fn get_me(&mut self) -> Result<Me, String> {
         let me: Me = self.get_json("/me", &[]).await?;
         self.user_id = Some(me.id.clone());
+        self.me = Some(me.clone());
         Ok(me)
+    }
+
+    /// `/me` as last fetched this run (logging in fetches it), or fetched now.
+    pub async fn me(&mut self) -> Result<Me, String> {
+        match &self.me {
+            Some(me) => Ok(me.clone()),
+            None => self.get_me().await,
+        }
     }
 
     pub async fn user_id(&mut self) -> Result<String, String> {
@@ -395,6 +431,7 @@ async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Re
     }
     let mut attempt = 0;
     loop {
+        pace().await;
         let resp = request
             .try_clone()
             .ok_or_else(|| "request can't be retried".to_string())?
@@ -410,12 +447,56 @@ async fn send_with_retry(request: reqwest::RequestBuilder) -> Result<reqwest::Re
             }
             // Too long to wait here: nothing more is sent until then.
             let pause = retry_after(&resp).unwrap_or(DEFAULT_RATE_LIMIT_PAUSE);
-            if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
-                *until = Some(Instant::now() + pause);
-            }
+            set_rate_limit(pause);
             return Err(rate_limit_message(pause));
         }
         return Ok(resp);
+    }
+}
+
+/// Waits, if need be, until sending one more request keeps within `PACE_LIMIT`
+/// a `PACE_WINDOW`.
+async fn pace() {
+    loop {
+        let wait = {
+            let mut sent = RECENT_REQUESTS.lock().unwrap_or_else(|e| e.into_inner());
+            let now = Instant::now();
+            while sent.front().is_some_and(|at| now.duration_since(*at) >= PACE_WINDOW) {
+                sent.pop_front();
+            }
+            match sent.front() {
+                Some(oldest) if sent.len() >= PACE_LIMIT => PACE_WINDOW - now.duration_since(*oldest),
+                _ => {
+                    sent.push_back(now);
+                    return;
+                }
+            }
+        };
+        tokio::time::sleep(wait).await;
+    }
+}
+
+fn saved_limit_path() -> Option<PathBuf> {
+    // Tests leave the real one (and the app's actual wait) alone.
+    if cfg!(test) {
+        return Some(std::env::temp_dir().join("spotilarp-test-rate-limit"));
+    }
+    dirs::cache_dir().map(|dir| dir.join("SpotiLarp").join("rate-limit"))
+}
+
+fn set_rate_limit(pause: Duration) {
+    if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
+        *until = Some(Instant::now() + pause);
+    }
+    // As a wall-clock time, since the next run's clock starts again.
+    let Some(path) = saved_limit_path() else { return };
+    let until_ms = SystemTime::now()
+        .checked_add(pause)
+        .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
+        .map(|since| since.as_millis());
+    if let (Some(until_ms), Some(dir)) = (until_ms, path.parent()) {
+        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::write(&path, until_ms.to_string());
     }
 }
 
@@ -423,9 +504,30 @@ fn clear_rate_limit() {
     if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
         *until = None;
     }
+    if let Some(path) = saved_limit_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
-fn rate_limited_for() -> Option<Duration> {
+/// A limit Spotify set before the app last closed.
+fn read_saved_limit() {
+    let Some(text) = saved_limit_path().and_then(|path| std::fs::read_to_string(path).ok()) else {
+        return;
+    };
+    let Some(until_ms) = text.trim().parse::<u64>().ok() else {
+        return;
+    };
+    let until = UNIX_EPOCH + Duration::from_millis(until_ms);
+    if let Ok(left) = until.duration_since(SystemTime::now()) {
+        if let Ok(mut held) = RATE_LIMITED_UNTIL.lock() {
+            *held = Some(Instant::now() + left);
+        }
+    }
+}
+
+/// How much longer Spotify asked SpotiLarp to wait, if it did.
+pub fn rate_limited_for() -> Option<Duration> {
+    SAVED_LIMIT_READ.call_once(read_saved_limit);
     let until = (*RATE_LIMITED_UNTIL.lock().ok()?)?;
     until.checked_duration_since(Instant::now()).filter(|wait| !wait.is_zero())
 }
@@ -439,13 +541,9 @@ fn rate_limit_message(wait: Duration) -> String {
     } else {
         format!("{minutes} minutes")
     };
-    // A long wait is for this Client ID only; another Spotify app has its own allowance.
-    let switch = if minutes > 15 {
-        " Or make a new app on Spotify's developer dashboard and switch to its Client ID in Settings."
-    } else {
-        ""
-    };
-    format!("{RATE_LIMITED} right now. Try again in {when}.{switch}")
+    // A new Client ID doesn't get round a long wait: Spotify has turned away a
+    // brand-new app with the same wait, to the minute, so it holds for the account.
+    format!("{RATE_LIMITED} right now. Try again in {when}.")
 }
 
 async fn read_body(resp: reqwest::Response, what: &str) -> Result<String, RequestError> {
@@ -482,10 +580,25 @@ mod tests {
         assert!(rate_limit_message(Duration::from_secs(5)).ends_with("in 1 minute."));
         assert!(rate_limit_message(Duration::from_secs(61)).ends_with("in 2 minutes."));
         let long = rate_limit_message(Duration::from_secs(20 * 3600));
-        assert!(long.contains("in about 20 hours.") && long.contains("Client ID in Settings"));
+        assert!(long.ends_with("in about 20 hours."));
     }
 
     // (set_client_id itself isn't run here: it would log out the real keychain login.)
+    #[test]
+    fn a_limit_outlasts_a_restart() {
+        set_rate_limit(Duration::from_secs(3600));
+        // A new run: nothing in memory, only what was saved.
+        if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {
+            *until = None;
+        }
+        read_saved_limit();
+        let left = rate_limited_for().expect("the saved limit should still apply");
+        assert!(left > Duration::from_secs(3500) && left <= Duration::from_secs(3600));
+        clear_rate_limit();
+        read_saved_limit();
+        assert!(rate_limited_for().is_none());
+    }
+
     #[test]
     fn a_cleared_limit_lets_requests_through() {
         if let Ok(mut until) = RATE_LIMITED_UNTIL.lock() {

@@ -9,10 +9,16 @@ export const RATE_LIMITED = "Spotify is limiting how often SpotiLarp can ask it 
 export const isRateLimited = (error) => String(error).startsWith(RATE_LIMITED);
 
 let onLoginExpired = () => {};
+let onRateLimited = () => {};
 
 /** @param {() => void} handler */
 export function setLoginExpiredHandler(handler) {
   onLoginExpired = handler;
+}
+
+/** @param {() => void} handler */
+export function setRateLimitedHandler(handler) {
+  onRateLimited = handler;
 }
 
 /**
@@ -23,6 +29,7 @@ export function setLoginExpiredHandler(handler) {
 function invoke(command, args) {
   return tauriInvoke(command, args).catch((e) => {
     if (e === LOGIN_EXPIRED) onLoginExpired();
+    else if (isRateLimited(e)) onRateLimited();
     throw e;
   });
 }
@@ -36,6 +43,19 @@ export const login = () => invoke("login");
 export const cancelLogin = () => invoke("cancel_login");
 export const loginStatus = () => invoke("login_status");
 export const restoreSession = () => invoke("restore_session");
+/** @returns {Promise<import("./types.js").Profile>} */
+export const getProfile = () => invoke("get_profile");
+/**
+ * Seconds until Spotify takes requests again, or null when it isn't turning them away.
+ * @returns {Promise<number|null>}
+ */
+export const rateLimitRemaining = () => invoke("rate_limit_remaining");
+/**
+ * A user's profile page; yours without an ID.
+ * @param {string} [userId]
+ * @returns {Promise<import("./types.js").UserProfile>}
+ */
+export const getUserProfile = (userId) => invoke("get_user_profile", { userId });
 export const logout = () => invoke("logout");
 export const hasConnectSession = () => invoke("has_connect_session");
 /** @param {boolean} interactive */
@@ -43,8 +63,9 @@ export const connectPlayback = (interactive) => invoke("connect_playback", { int
 /**
  * @param {string} uri
  * @param {number} [positionMs]
+ * @param {boolean} [paused] load it without starting it
  */
-export const playTrack = (uri, positionMs = 0) => invoke("play_track", { uri, positionMs });
+export const playTrack = (uri, positionMs = 0, paused = false) => invoke("play_track", { uri, positionMs, paused });
 /** @param {string} uri */
 export const preloadTrack = (uri) => invoke("preload_track", { uri });
 /**
@@ -130,10 +151,17 @@ export const setVolume = (volume) => invoke("set_volume", { volume });
  * @param {string} artistName
  * @param {string} albumName
  * @param {number} durationMs
+ * @param {boolean} [recheck] ask again even if no lyrics were found last time
  * @returns {Promise<import("./types.js").LyricsResult | null>}
  */
-export const getLyrics = (trackId, trackName, artistName, albumName, durationMs) =>
-  invoke("get_lyrics", { trackId, trackName, artistName, albumName, durationMs });
+export const getLyrics = (trackId, trackName, artistName, albumName, durationMs, recheck = false) =>
+  invoke("get_lyrics", { trackId, trackName, artistName, albumName, durationMs, recheck });
+/**
+ * Lyrics lines in Latin letters: romaji, Korean romanization, pinyin and so on.
+ * @param {string[]} lines
+ * @returns {Promise<string[]>}
+ */
+export const romanizeLyrics = (lines) => invoke("romanize_lyrics", { lines });
 /**
  * @param {string} artistId
  * @returns {Promise<import("./types.js").ArtistDetails>}
@@ -146,8 +174,8 @@ export const followArtist = (artistId) => invoke("follow_artist", { artistId });
 /** @param {string} artistId */
 export const unfollowArtist = (artistId) => invoke("unfollow_artist", { artistId });
 export const hasDiscordClientId = () => invoke("has_discord_client_id");
-/** @param {string} clientId */
-export const setDiscordClientId = (clientId) => invoke("set_discord_client_id", { clientId });
+/** Turns the Discord status on (SpotiLarp's own Discord app, nothing to set up). */
+export const enableDiscordPresence = () => invoke("enable_discord_presence");
 export const clearDiscordClientId = () => invoke("clear_discord_client_id");
 /**
  * @param {string} query
@@ -165,6 +193,14 @@ export const searchTracksPage = (query, offset) => invoke("search_tracks_page", 
  * @returns {Promise<import("./types.js").ArtistPage>}
  */
 export const getArtistPage = (artistId) => invoke("get_artist_page", { artistId });
+/**
+ * The Now Playing panel's artist, credits, concerts and Canvas; null when
+ * there's no playback session to ask.
+ * @param {string} trackId
+ * @param {string} artistId
+ * @returns {Promise<import("./types.js").NowPlayingInfo|null>}
+ */
+export const getNowPlayingInfo = (trackId, artistId) => invoke("get_now_playing_info", { trackId, artistId });
 /**
  * @param {string} artistId
  * @param {import("./types.js").ReleaseGroup} group
@@ -297,3 +333,40 @@ export const pickFolder = () => invoke("pick_folder");
 export const getLocalFiles = () => invoke("get_local_files");
 /** @returns {Promise<import("./types.js").LocalLibrary>} */
 export const rescanLocalFiles = () => invoke("rescan_local_files");
+/**
+ * Starts hosting a Jam.
+ * @returns {Promise<{ code: string, link: string }>} what others join with, and the same as a listen-along link
+ */
+export const jamHost = () => invoke("jam_host");
+/**
+ * A system notification, when the window isn't the one in front.
+ * @param {string} text
+ */
+export const jamNotify = (text) => invoke("jam_notify", { text });
+/** @param {string} code */
+export const jamJoin = (code) => invoke("jam_join", { code });
+/**
+ * @param {string|null} peer one peer, or null for everyone (a guest's only peer is "host")
+ * @param {object} message
+ */
+export const jamSend = (peer, message) => invoke("jam_send", { peer, message });
+/** @param {string} peer */
+export const jamRemove = (peer) => invoke("jam_remove", { peer });
+/** Leaves the Jam, or ends it for everyone when hosting. */
+export const jamLeave = () => invoke("jam_leave");
+/**
+ * The connected Discord account, as last seen.
+ * @returns {Promise<import("./discordAccount.svelte.js").DiscordProfile|null>}
+ */
+export const discordAccount = () => invoke("discord_account");
+/**
+ * Signs in to Discord in the browser.
+ * @returns {Promise<import("./discordAccount.svelte.js").DiscordProfile>}
+ */
+export const connectDiscord = () => invoke("connect_discord");
+/**
+ * Asks Discord for the account again: null once it's been disconnected from Discord's side.
+ * @returns {Promise<import("./discordAccount.svelte.js").DiscordProfile|null>}
+ */
+export const refreshDiscordAccount = () => invoke("refresh_discord_account");
+export const disconnectDiscord = () => invoke("disconnect_discord");

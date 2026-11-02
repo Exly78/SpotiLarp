@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api.js";
 import { notify } from "./toast.svelte.js";
-import { queue, next, previous, hasPrevious, prepareNext, playCurrent, slim, updateCurrent } from "./queue.svelte.js";
+import { queue, next, previous, hasPrevious, prepareNext, playCurrent, slim, updateCurrent, jamGuest } from "./queue.svelte.js";
 import { isEpisodeUri, recordPosition, episodeTrack } from "./podcasts.svelte.js";
 import { setFadeHandler } from "./sleep.svelte.js";
 import { dominantColor } from "./colors.js";
@@ -77,7 +77,7 @@ setFadeHandler((level) => {
 });
 
 /** Where playback is right now (the on-screen position only moves a few times a second). */
-function currentPositionMs() {
+export function currentPositionMs() {
   if (!player.isPlaying || !player.track) return player.positionMs;
   return Math.min(anchorMs + (performance.now() - anchorAt), player.track.durationMs);
 }
@@ -188,6 +188,7 @@ listen("player-event", (event) => {
       if (e.type === "EndOfTrack") setPosition(0);
       break;
     case "PreloadNext":
+      if (jamGuest()) break;
       prepareNext().then((upcoming) => {
         if (upcoming) api.preloadTrack(upcoming.uri).catch(() => {});
       });
@@ -229,6 +230,8 @@ listen("media-control", (event) => {
 });
 
 export async function togglePlay() {
+  const guest = jamGuest();
+  if (guest) return guest.control("toggle");
   if (!player.track) return;
   try {
     if (!player.loaded) {
@@ -271,12 +274,16 @@ export function resetPlayer() {
 }
 
 export function previousOrRestart() {
+  const guest = jamGuest();
+  if (guest) return guest.control("previous");
   if (player.positionMs > RESTART_THRESHOLD_MS || !hasPrevious()) seekTo(0);
   else previous();
 }
 
 /** @param {number} ms */
 export async function seekTo(ms) {
+  const guest = jamGuest();
+  if (guest) return guest.control("seek", ms);
   setPosition(ms);
   if (!player.loaded) return saveSession();
   try {

@@ -25,7 +25,7 @@
     resetPlayer,
   } from "$lib/player.svelte.js";
   import { notify } from "$lib/toast.svelte.js";
-  import { nav, navigate, goBack, goForward, resetNav, openArtist, openAlbum, openShow } from "$lib/nav.svelte.js";
+  import { nav, navigate, goBack, goForward, resetNav, openArtist, openAlbum, openShow, openProfile } from "$lib/nav.svelte.js";
   import { library, loadLibrary, loadFolders, clearLibrary } from "$lib/library.svelte.js";
   import { likedIds, toggleLike, clearLikes } from "$lib/likes.svelte.js";
   import { isTextField } from "$lib/keys.js";
@@ -44,6 +44,9 @@
   import NowPlaying from "$lib/components/NowPlaying.svelte";
   import NowPlayingPanel from "$lib/components/NowPlayingPanel.svelte";
   import QueuePanel from "$lib/components/QueuePanel.svelte";
+  import JamPanel from "$lib/components/JamPanel.svelte";
+  import ListenAlongPrompt from "$lib/components/ListenAlongPrompt.svelte";
+  import { jam, leaveJam, setDefaultName, setDiscordSharing } from "$lib/jam.svelte.js";
   import TrackContextMenu from "$lib/components/TrackContextMenu.svelte";
   import MiniPlayer from "$lib/components/MiniPlayer.svelte";
   import ClientIdSetup from "$lib/components/ClientIdSetup.svelte";
@@ -53,7 +56,9 @@
   import AccountMenu from "$lib/components/AccountMenu.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import Icon from "$lib/components/Icon.svelte";
-  import { smallestCover } from "$lib/utils.js";
+  import { coverAtLeast, formatCount, smallestCover } from "$lib/utils.js";
+  import { discordAccount } from "$lib/discordAccount.svelte.js";
+  import { onRateLimitEnd, rateLimit, timeLeft } from "$lib/rateLimit.svelte.js";
 
   /** @type {boolean|null} */
   let clientIdConfigured = $state(null);
@@ -64,6 +69,8 @@
   let restoreFailed = $state(false);
   let status = $state("Not logged in");
   let displayName = $state("");
+  /** @type {import("$lib/types.js").Profile|null} */
+  let profile = $state(null);
   let loggingIn = $state(false);
   let loggingOut = $state(false);
 
@@ -175,6 +182,15 @@
       panelView = "nowPlaying";
     } else {
       panelView = "queue";
+      showPanel = true;
+    }
+  }
+
+  function toggleJam() {
+    if (showPanel && panelView === "jam") {
+      panelView = "nowPlaying";
+    } else {
+      panelView = "jam";
       showPanel = true;
     }
   }
@@ -358,12 +374,13 @@
       evt.preventDefault();
       if (key === "a") goToPlayingArtist();
       else goToPlayingAlbum();
-    } else if (plain && !evt.shiftKey && !evt.repeat && ["m", "b", "s", "r", "q", "l", "f"].includes(key)) {
+    } else if (plain && !evt.shiftKey && !evt.repeat && ["m", "b", "s", "r", "q", "j", "l", "f"].includes(key)) {
       if (key === "m") toggleMute();
       else if (key === "b") likePlaying();
       else if (key === "s") cycleShuffle();
       else if (key === "r") cycleRepeatMode();
       else if (key === "q") toggleQueue();
+      else if (key === "j") toggleJam();
       else if (key === "l") toggleLyrics();
       else setLyricsFullscreen(!lyricsFullscreen);
     } else if (!typing && evt.code === "Space" && !ctrl && !evt.altKey) {
@@ -433,12 +450,39 @@
     clientIdConfigured = true;
   }
 
+  const regionNames = new Intl.DisplayNames(undefined, { type: "region" });
+
+  /** "GB" as "United Kingdom". @param {string|null} code */
+  function countryName(code) {
+    if (!code) return "";
+    try {
+      return regionNames.of(code) ?? code;
+    } catch {
+      return code;
+    }
+  }
+
+  // Whichever way you were logged out, your picture and details go with it.
+  $effect(() => {
+    if (!loggedIn) profile = null;
+  });
+
+  /** Your name as last seen, for when Spotify can't be asked (cleared with the other saved answers on logout). */
+  const SAVED_NAME_KEY = "spotilarp.cache.display-name";
+
   /** @param {string} name */
   async function onLoggedIn(name) {
+    try {
+      localStorage.setItem(SAVED_NAME_KEY, name);
+    } catch {}
+    api.getProfile().then((found) => (profile = found)).catch((e) => console.warn("Couldn't load your profile:", e));
     loggedIn = true;
     restoreFailed = false;
     displayName = name;
     status = `Logged in as ${name}`;
+    setDefaultName(name);
+    // Friends can listen along from the Discord status whenever it's showing.
+    api.hasDiscordClientId().then(setDiscordSharing).catch(() => {});
     loadLibrary();
     if (!launchCommandsRun) {
       launchCommandsRun = true;
@@ -458,6 +502,21 @@
     notify(api.LOGIN_EXPIRED);
   }
 
+  /**
+   * Turned away for asking too often isn't logged out: the login is fine, so
+   * carry on with what's saved and let the notice say when it's over.
+   */
+  async function carryOnRateLimited() {
+    let saved = null;
+    try {
+      saved = localStorage.getItem(SAVED_NAME_KEY);
+    } catch {}
+    await onLoggedIn(saved || "you");
+  }
+
+  // When it's over, ask again for what couldn't load (your name, profile and library).
+  $effect(() => onRateLimitEnd(() => restoreSessionIfPossible()));
+
   async function restoreSessionIfPossible() {
     restoreFailed = false;
     try {
@@ -467,6 +526,10 @@
       await onLoggedIn(await api.restoreSession());
     } catch (e) {
       if (e === api.LOGIN_EXPIRED) return;
+      if (api.isRateLimited(e)) {
+        await carryOnRateLimited();
+        return;
+      }
       restoreFailed = true;
       status = "Couldn't reach Spotify";
       notify(`Couldn't restore your session: ${e}`);
@@ -483,6 +546,11 @@
     try {
       await onLoggedIn(await api.login());
     } catch (e) {
+      // The browser part worked (the login is saved); only asking who you are was turned away.
+      if (api.isRateLimited(e) && (await api.loginStatus().catch(() => false))) {
+        await carryOnRateLimited();
+        return;
+      }
       status = loggedIn ? previousStatus : "Not logged in";
       if (e !== api.LOGIN_CANCELLED) notify(`Login failed: ${e}`);
     } finally {
@@ -497,6 +565,8 @@
   async function logout() {
     loggingOut = true;
     try {
+      setDiscordSharing(false);
+      await leaveJam();
       await api.logout();
       loggedIn = false;
       displayName = "";
@@ -632,14 +702,18 @@
 
     <div class="topbar-right">
     <div class="account-controls">
-      <span class="status-text wide-only">{status}</span>
+      {#if rateLimit.until > 0}
+        <span
+          class="rate-limit-pill"
+          title="Spotify is turning away SpotiLarp's requests for a while (it got too many in a short time). Playback still works, and everything refreshes once it's over."
+        >
+          Spotify limit · back in {timeLeft(rateLimit.until)}
+        </span>
+      {/if}
       {#if loggingIn}
+        <span class="status-text wide-only">{status}</span>
         <button type="button" onclick={cancelLogin} class="pill-button">Cancel</button>
-      {:else if loggedIn}
-        <button onclick={logout} disabled={loggingOut} class="pill-button wide-only">
-          {loggingOut ? "Logging out..." : "Log out"}
-        </button>
-      {:else}
+      {:else if !loggedIn}
         {#if restoreFailed}
           <button onclick={restoreSessionIfPossible} disabled={restoring} class="pill-button primary">Retry</button>
         {/if}
@@ -660,19 +734,69 @@
           <button onclick={() => connectPlayback(true)} class="pill-button">Connect playback</button>
         {/if}
       {/if}
-      <div class="narrow-only">
-        <AccountMenu initial={loggedIn ? displayName.charAt(0) : ""} label={status}>
-          <div class="menu-status">{status}</div>
-          <div class="menu-status">{playbackConnected ? "Playback connected" : `Playback: ${playbackStatus}`}</div>
-          {#if loggedIn}
-            <button onclick={logout} disabled={loggingOut} class="pill-button">
-              {loggingOut ? "Logging out..." : "Log out"}
-            </button>
-          {:else if !loggingIn && !restoring}
-            <button type="button" onclick={changeClientId} class="text-button menu-link">Change Client ID</button>
+      <AccountMenu
+        initial={loggedIn ? displayName.charAt(0) : ""}
+        label={status}
+        imageUrl={loggedIn && profile ? smallestCover(profile.images) : null}
+      >
+        {#if loggedIn}
+          {@const picture = profile ? coverAtLeast(profile.images, 120) : null}
+          <div class="menu-account">
+            {#if picture}
+              <img src={picture} alt="" class="menu-avatar" />
+            {:else}
+              <div class="menu-avatar placeholder">{displayName.charAt(0)}</div>
+            {/if}
+            <div class="menu-account-text">
+              <div class="menu-name">{profile?.name ?? displayName}</div>
+              {#if profile}
+                <div class="menu-detail">
+                  {[
+                    profile.product === "premium" ? "Spotify Premium" : profile.product ? "Spotify Free" : "",
+                    countryName(profile.country),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+                {#if profile.followers != null}
+                  <div class="menu-detail">{formatCount(profile.followers)} {profile.followers === 1 ? "follower" : "followers"}</div>
+                {/if}
+              {/if}
+            </div>
+          </div>
+          {#if profile}
+            {@const id = profile.id}
+            {@const name = profile.name}
+            <button type="button" class="menu-row" onclick={() => openProfile({ id, name })}>Profile</button>
           {/if}
-        </AccountMenu>
-      </div>
+        {:else}
+          <div class="menu-status">{status}</div>
+        {/if}
+        <div class="menu-status">
+          <span class="menu-dot" class:on={playbackConnected}></span>
+          {playbackConnected ? "Playback connected" : `Playback: ${playbackStatus}`}
+        </div>
+        {#if discordAccount.profile}
+          {@const discord = discordAccount.profile}
+          <div class="menu-divider"></div>
+          <div class="menu-account discord">
+            <img src={discord.avatar_url} alt="" class="menu-avatar small" />
+            <div class="menu-account-text">
+              <div class="menu-name small">{discord.name}</div>
+              <div class="menu-detail">@{discord.username}</div>
+            </div>
+            <span class="menu-discord-badge" title="Connected to Discord"><Icon name="discord" size={14} /></span>
+          </div>
+        {/if}
+        {#if loggedIn}
+          <div class="menu-divider"></div>
+          <button onclick={logout} disabled={loggingOut} class="pill-button">
+            {loggingOut ? "Logging out..." : "Log out"}
+          </button>
+        {:else if !loggingIn && !restoring}
+          <button type="button" onclick={changeClientId} class="text-button menu-link">Change Client ID</button>
+        {/if}
+      </AccountMenu>
       <button
         type="button"
         class="panel-toggle"
@@ -725,8 +849,15 @@
     <div class="panel-area" class:collapsed={!showPanel}>
       {#if panelView === "queue"}
         <QueuePanel onClose={() => (panelView = "nowPlaying")} />
+      {:else if panelView === "jam"}
+        <JamPanel {displayName} onClose={() => (panelView = "nowPlaying")} onShowQueue={() => (panelView = "queue")} />
       {:else}
-        <NowPlayingPanel contextName={contextLabel() || null} onClose={() => (showPanel = false)} />
+        <NowPlayingPanel
+          contextName={jam.role === "guest" ? `${jam.hostName || "Someone"}'s Jam` : contextLabel() || null}
+          visible={showPanel}
+          onClose={() => (showPanel = false)}
+          onShowQueue={() => (panelView = "queue")}
+        />
       {/if}
     </div>
   </div>
@@ -735,12 +866,17 @@
     <NowPlaying
       queueOpen={showPanel && panelView === "queue"}
       onToggleQueue={toggleQueue}
+      jamOpen={showPanel && panelView === "jam"}
+      onToggleJam={toggleJam}
       onMiniMode={() => setMiniMode(true)}
     />
   </footer>
 </div>
 {/if}
 <Toasts />
+{#if !miniMode && !uiAsleep}
+  <ListenAlongPrompt />
+{/if}
 <TrackContextMenu />
 {#if showShortcuts}
   <ShortcutsDialog onClose={() => (showShortcuts = false)} />
@@ -813,7 +949,9 @@
 }
 
 :global(:root) {
-  
+  /* Native controls (WebKitGTK's selects especially) are drawn light otherwise. */
+  color-scheme: dark;
+
   --bg: #000000;
   --surface: #121212;
   --surface-raised: #181818;
@@ -1121,22 +1259,116 @@ h1 {
   justify-content: flex-end;
 }
 
-.narrow-only {
-  display: none;
-}
 @media (max-width: 1679px) {
   .wide-only {
     display: none;
   }
-  .narrow-only {
-    display: block;
-  }
 }
 
+.rate-limit-pill {
+  flex-shrink: 0;
+  padding: 0.35em 0.8em;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+  cursor: help;
+}
 .menu-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
   font-size: var(--fs-sm);
   color: var(--text-dim);
   white-space: nowrap;
+}
+.menu-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.menu-dot.on {
+  background: var(--accent);
+}
+.menu-account {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  min-width: 0;
+}
+.menu-avatar {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--control-bg);
+}
+.menu-avatar.small {
+  width: 36px;
+  height: 36px;
+}
+.menu-avatar.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  color: var(--text);
+}
+.menu-account-text {
+  flex: 1;
+  min-width: 0;
+}
+.menu-name {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-name.small {
+  font-size: var(--fs-sm);
+}
+.menu-detail {
+  margin-top: 0.15em;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-discord-badge {
+  display: flex;
+  flex-shrink: 0;
+  color: #5865f2;
+}
+.menu-row {
+  align-self: stretch;
+  padding: 0.5em 0.6em;
+  margin: 0 -0.6em;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.menu-row:hover {
+  background: var(--surface-hover);
+}
+.menu-divider {
+  height: 1px;
+  margin: 0.1em 0;
+  background: var(--surface-hover);
 }
 .menu-link {
   align-self: flex-start;

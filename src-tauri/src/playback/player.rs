@@ -39,9 +39,9 @@ pub fn start(session: Session, settings: &Settings) -> PlayerHandle {
     PlayerHandle { player, mixer }
 }
 
-pub fn play_uri(player: &Player, uri: &str, position_ms: u32) -> Result<(), String> {
+pub fn play_uri(player: &Player, uri: &str, position_ms: u32, start_playing: bool) -> Result<(), String> {
     let spotify_uri = SpotifyUri::from_uri(uri).map_err(|e| e.to_string())?;
-    player.load(spotify_uri, true, position_ms);
+    player.load(spotify_uri, start_playing, position_ms);
     Ok(())
 }
 

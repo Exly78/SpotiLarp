@@ -58,6 +58,45 @@ pub async fn page(session: &Session, id: &str) -> Result<ArtistPage, String> {
         .filter(|artist| artist["__typename"] == "Artist")
         .ok_or_else(|| "Spotify doesn't have a page for this artist".to_string())?;
 
+    Ok(ArtistPage {
+        following: artist.get("saved").and_then(Value::as_bool),
+        top_tracks: list(artist, "/discography/topTracks/items")
+            .iter()
+            .filter_map(|item| {
+                let track = item.get("track")?;
+                Some(PopularTrack {
+                    track: pathfinder::track(track)?,
+                    playcount: count(track, "/playcount"),
+                    explicit: pathfinder::is_explicit(track),
+                })
+            })
+            .collect(),
+        latest_release: artist.pointer("/discography/latest").and_then(pathfinder::album),
+        popular_releases: list(artist, "/discography/popularReleasesAlbums/items")
+            .iter()
+            .filter_map(pathfinder::album)
+            .collect(),
+        albums: grouped_releases(artist, "/discography/albums"),
+        singles: grouped_releases(artist, "/discography/singles"),
+        compilations: grouped_releases(artist, "/discography/compilations"),
+        album_count: release_count(artist, "albums"),
+        single_count: release_count(artist, "singles"),
+        compilation_count: release_count(artist, "compilations"),
+        related_artists: list(artist, "/relatedContent/relatedArtists/items")
+            .iter()
+            .filter_map(related_artist)
+            .collect(),
+        appears_on: grouped_releases(artist, "/relatedContent/appearsOn"),
+        featuring: playlist_cards(artist, "/relatedContent/featuringV2/items"),
+        discovered_on: playlist_cards(artist, "/relatedContent/discoveredOnV2/items"),
+        playlists: playlist_cards(artist, "/profile/playlistsV2/items"),
+        ..about(artist, id)
+    })
+}
+
+/// The "About" half of an artist (photos, stats, bio, links), which the artist
+/// page and the Now Playing panel's query both carry.
+pub fn about(artist: &Value, id: &str) -> ArtistPage {
     let mut header_images = images(artist, "/headerImage/data");
     if header_images.is_empty() {
         header_images = images(artist, "/visuals/headerImage");
@@ -65,7 +104,7 @@ pub async fn page(session: &Session, id: &str) -> Result<ArtistPage, String> {
     let verified = artist.pointer("/onPlatformReputationTrait/verification/isVerified") == Some(&Value::Bool(true))
         || artist.pointer("/profile/verified") == Some(&Value::Bool(true));
 
-    Ok(ArtistPage {
+    ArtistPage {
         id: id.to_string(),
         name: text(artist, "/profile/name"),
         images: images(artist, "/visuals/avatarImage"),
@@ -105,38 +144,8 @@ pub async fn page(session: &Session, id: &str) -> Result<ArtistPage, String> {
             })
             .filter(|link| link.url.starts_with("https://") || link.url.starts_with("http://"))
             .collect(),
-        following: artist.get("saved").and_then(Value::as_bool),
-        top_tracks: list(artist, "/discography/topTracks/items")
-            .iter()
-            .filter_map(|item| {
-                let track = item.get("track")?;
-                Some(PopularTrack {
-                    track: pathfinder::track(track)?,
-                    playcount: count(track, "/playcount"),
-                    explicit: pathfinder::is_explicit(track),
-                })
-            })
-            .collect(),
-        latest_release: artist.pointer("/discography/latest").and_then(pathfinder::album),
-        popular_releases: list(artist, "/discography/popularReleasesAlbums/items")
-            .iter()
-            .filter_map(pathfinder::album)
-            .collect(),
-        albums: grouped_releases(artist, "/discography/albums"),
-        singles: grouped_releases(artist, "/discography/singles"),
-        compilations: grouped_releases(artist, "/discography/compilations"),
-        album_count: release_count(artist, "albums"),
-        single_count: release_count(artist, "singles"),
-        compilation_count: release_count(artist, "compilations"),
-        related_artists: list(artist, "/relatedContent/relatedArtists/items")
-            .iter()
-            .filter_map(related_artist)
-            .collect(),
-        appears_on: grouped_releases(artist, "/relatedContent/appearsOn"),
-        featuring: playlist_cards(artist, "/relatedContent/featuringV2/items"),
-        discovered_on: playlist_cards(artist, "/relatedContent/discoveredOnV2/items"),
-        playlists: playlist_cards(artist, "/profile/playlistsV2/items"),
-    })
+        ..Default::default()
+    }
 }
 
 /// What the Web API still offers: name, photo, genres and releases, with

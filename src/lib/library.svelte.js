@@ -1,6 +1,9 @@
 import * as api from "./api.js";
+import { clearCached } from "./requestCache.js";
 
 const CACHE_KEY = "spotilarp.library";
+/** How old a saved library can be and still be shown without asking Spotify. */
+const LIBRARY_FRESH_MS = 10 * 60_000;
 
 /**
  * `folders` is the playlist order with folders, once the playback session has
@@ -23,7 +26,7 @@ let loadToken = 0;
 /**
  * The last library seen, shown straight away at startup while Spotify is
  * asked again (it replaces the cache once it answers).
- * @returns {{ playlists: import("./types.js").Playlist[], albums: import("./types.js").Album[], shows?: import("./types.js").Show[], folders?: import("./types.js").RootlistEntry[]|null, userId: string|null }|null}
+ * @returns {{ playlists: import("./types.js").Playlist[], albums: import("./types.js").Album[], shows?: import("./types.js").Show[], folders?: import("./types.js").RootlistEntry[]|null, userId: string|null, savedAt?: number }|null}
  */
 function readCache() {
   try {
@@ -38,11 +41,17 @@ function writeCache() {
     const { playlists, albums, folders, userId } = $state.snapshot(library);
     // Descriptions can be long and the sidebar doesn't show them.
     const shows = $state.snapshot(library.shows).map(({ description, ...show }) => show);
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ playlists, albums, shows, folders, userId }));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ playlists, albums, shows, folders, userId, savedAt: Date.now() }));
   } catch {}
 }
 
-export async function loadLibrary() {
+/**
+ * Shows the saved library straight away, then asks Spotify for the current one,
+ * unless the saved one is only minutes old (reopening the app shouldn't ask for
+ * every playlist again) and `force` (the refresh button) isn't set.
+ * @param {{ force?: boolean }} [options]
+ */
+export async function loadLibrary({ force = false } = {}) {
   const token = ++loadToken;
   library.loading = true;
   library.error = "";
@@ -55,6 +64,10 @@ export async function loadLibrary() {
     library.userId = cached.userId;
   }
   loadFolders();
+  if (!force && cached && Date.now() - (cached.savedAt ?? 0) < LIBRARY_FRESH_MS) {
+    library.loading = false;
+    return;
+  }
   const albumsLoaded = Promise.all([
     api
       .getSavedAlbums()
@@ -112,6 +125,7 @@ export function clearLibrary() {
   library.loading = false;
   library.userId = null;
   library.missingScopes = [];
+  clearCached();
   try {
     localStorage.removeItem(CACHE_KEY);
   } catch {}

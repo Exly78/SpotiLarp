@@ -68,6 +68,11 @@ pub const ARTIST_DISCOGRAPHY_COMPILATIONS: Operation = Operation {
     hash: "5e07d323febb57b4a56a42abbf781490e58764aa45feb6e3dc0591564fc56599",
     chunk: ARTIST_CHUNK,
 };
+pub const NPV_ARTIST: Operation = Operation {
+    name: "queryNpvArtist",
+    hash: "e1ae46a21911a3075c1aa29bf09a6c60f9a45b6a2b1132429f10ad06c299b5d7",
+    chunk: None,
+};
 pub const PLAYLIST_CONTENTS: Operation = Operation {
     name: "fetchPlaylistContents",
     hash: "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a",

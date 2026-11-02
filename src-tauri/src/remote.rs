@@ -10,6 +10,7 @@ use crate::state::AppState;
 
 pub const REMOTE_COMMAND_EVENT: &str = "remote-command";
 const DEFAULT_VOLUME_STEP: i32 = 10;
+const LISTEN_LINK_PREFIX: &str = "spotilarp://listen/";
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -32,6 +33,8 @@ pub enum RemoteCommand {
     /// A `spotify:` URI or `open.spotify.com` link, played or opened by the UI.
     Open { link: String },
     Search { query: String },
+    /// A `spotilarp://listen/<code>` link: someone's "Listen along" button on Discord.
+    ListenAlong { code: String },
     Show,
     /// Back to the built-in look, for a theme that made the window unusable.
     ResetTheme,
@@ -40,7 +43,7 @@ pub enum RemoteCommand {
 impl RemoteCommand {
     /// Whether the window should come forward for this command.
     fn shows_window(&self) -> bool {
-        matches!(self, Self::Show | Self::Open { .. } | Self::Search { .. } | Self::ResetTheme)
+        matches!(self, Self::Show | Self::Open { .. } | Self::Search { .. } | Self::ListenAlong { .. } | Self::ResetTheme)
     }
 }
 
@@ -54,6 +57,9 @@ pub fn parse(args: &[String]) -> Option<RemoteCommand> {
         .filter(|arg| !arg.starts_with("--"))
         .collect();
     let (&verb, rest) = words.split_first()?;
+    if let Some(code) = listen_code(verb) {
+        return Some(RemoteCommand::ListenAlong { code });
+    }
     if is_link(verb) {
         return Some(RemoteCommand::Open { link: verb.to_string() });
     }
@@ -80,6 +86,13 @@ pub fn parse(args: &[String]) -> Option<RemoteCommand> {
         _ => return None,
     };
     Some(command)
+}
+
+/// The Jam code in a listen-along link, if it's one.
+fn listen_code(arg: &str) -> Option<String> {
+    let code = arg.strip_prefix(LISTEN_LINK_PREFIX)?.trim_end_matches('/');
+    let valid = code.len() == 43 && code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    valid.then(|| code.to_string())
 }
 
 fn is_link(arg: &str) -> bool {
@@ -180,5 +193,16 @@ mod tests {
             Some(RemoteCommand::Open { link: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M".into() })
         );
         assert_eq!(parse_words(&["play-uri", "nope"]), None);
+    }
+
+    #[test]
+    fn listen_links_join() {
+        let code = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-_";
+        let expected = Some(RemoteCommand::ListenAlong { code: code.into() });
+        assert_eq!(parse_words(&[&format!("spotilarp://listen/{code}")]), expected);
+        assert_eq!(parse_words(&[&format!("spotilarp://listen/{code}/")]), expected);
+        assert_eq!(parse_words(&["spotilarp://listen/short"]), None);
+        assert_eq!(parse_words(&[&format!("spotilarp://listen/{code}x")]), None);
+        assert_eq!(parse_words(&[&format!("spotilarp://listen/{}", "A!".repeat(21) + "A")]), None);
     }
 }

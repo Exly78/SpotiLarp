@@ -7,6 +7,7 @@
   import { onMount } from "svelte";
   import { nav, viewKey } from "../nav.svelte.js";
   import Lyrics from "./Lyrics.svelte";
+  import ProfileView from "./views/ProfileView.svelte";
   import HomeView from "./views/HomeView.svelte";
   import PlaylistView from "./views/PlaylistView.svelte";
   import ArtistView from "./views/ArtistView.svelte";
@@ -73,6 +74,8 @@
           <RadioView seed={nav.view.seed} name={nav.view.name} image={nav.view.image} />
         {:else if nav.view.type === "show"}
           <ShowView id={nav.view.id} name={nav.view.name} />
+        {:else if nav.view.type === "profile"}
+          <ProfileView id={nav.view.id} name={nav.view.name} />
         {:else}
           <HomeView {loggedIn} {loggingIn} {onRelogin} />
         {/if}

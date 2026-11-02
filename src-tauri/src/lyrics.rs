@@ -15,11 +15,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const LRCLIB_BASE: &str = "https://lrclib.net/api";
-/// Lyrics don't change, so a cached answer (a miss included) is good for this long.
+/// Lyrics don't change, so a cached answer is good for this long.
 const CACHE_LIFETIME: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+/// A miss is asked again sooner: Spotify and LRCLIB both keep adding lyrics.
+const MISS_LIFETIME: Duration = Duration::from_secs(3 * 24 * 60 * 60);
 /// A result this far from the song's length is another recording, however well the names match.
 const MAX_DRIFT_SECS: f64 = 30.0;
-const RATE_LIMIT_RETRIES: u32 = 3;
+/// How often a "busy" or "slow down" answer is tried again.
+const BUSY_RETRIES: u32 = 2;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Serialize)]
@@ -91,16 +94,23 @@ fn cache_dir() -> Option<PathBuf> {
     dirs::cache_dir().map(|base| base.join("SpotiLarp").join("lyrics"))
 }
 
-pub async fn fetch(session: Option<Session>, track_id: Option<&str>, query: &Query<'_>) -> Result<Option<LyricsResult>, String> {
+/// `recheck` asks again even where a miss was remembered: someone's just
+/// added the lyrics.
+pub async fn fetch(
+    session: Option<Session>,
+    track_id: Option<&str>,
+    query: &Query<'_>,
+    recheck: bool,
+) -> Result<Option<LyricsResult>, String> {
     let cache = cache_dir();
     if let (Some(session), Some(id)) = (session, track_id) {
-        if let Some(found) = spotify_lyrics(&session, id, cache.as_deref()).await {
+        if let Some(found) = spotify_lyrics(&session, id, cache.as_deref(), recheck).await {
             return Ok(Some(found.into_result("spotify")));
         }
     }
 
     let cache_path = cache.map(|dir| dir.join(format!("lrclib-{}.json", cache_key(query))));
-    if let Some(cached) = cache_path.as_deref().and_then(read_cache) {
+    if let Some(cached) = cache_path.as_deref().and_then(read_cache).filter(|found| found.is_some() || !recheck) {
         return Ok(cached.map(|lyrics| lyrics.into_result("lrclib")));
     }
     let found = lrclib_lookup(query).await?;
@@ -112,10 +122,10 @@ pub async fn fetch(session: Option<Session>, track_id: Option<&str>, query: &Que
 
 /// Spotify's transcription, or `None` when it has none or asking failed
 /// (failures aren't cached, so they're asked again next time).
-async fn spotify_lyrics(session: &Session, track_id: &str, cache: Option<&Path>) -> Option<Lyrics> {
+async fn spotify_lyrics(session: &Session, track_id: &str, cache: Option<&Path>, recheck: bool) -> Option<Lyrics> {
     let id = SpotifyId::from_base62(track_id).ok()?;
     let path = cache.map(|dir| dir.join(format!("spotify-{track_id}.json")));
-    if let Some(cached) = path.as_deref().and_then(read_cache) {
+    if let Some(cached) = path.as_deref().and_then(read_cache).filter(|found| found.is_some() || !recheck) {
         return cached;
     }
     let found = match session.spclient().get_lyrics(&id).await {
@@ -168,6 +178,13 @@ fn from_spotify(json: &serde_json::Value) -> Option<Lyrics> {
     Some(Lyrics { lines, synced, instrumental: false })
 }
 
+/// LRCLIB's exact lookup, then its search: with the title as cleaned, then
+/// with nothing in brackets ("Pass on (Vocal. Meursault)" is filed as "Pass
+/// on"). The exact lookup goes looking elsewhere for songs LRCLIB doesn't have,
+/// so it's the one that's often too busy to answer; that's no reason to skip
+/// the search, which usually has the song anyway. A miss is only a miss when
+/// every request was answered; otherwise it's an error, which isn't cached, so
+/// the next play asks again.
 async fn lrclib_lookup(query: &Query<'_>) -> Result<Option<Lyrics>, String> {
     let title = clean_title(query.title);
     let artist = clean_artist(query.artist);
@@ -182,18 +199,74 @@ async fn lrclib_lookup(query: &Query<'_>) -> Result<Option<Lyrics>, String> {
     if query.duration_ms > 0 {
         exact.push(("duration", duration.as_str()));
     }
-    if let Some(lyrics) = lrclib_get::<Record>("/get", &exact).await?.and_then(|record| record.lyrics()) {
-        return Ok(Some(lyrics));
+
+    // No waiting on the first try: a busy answer goes straight on to the search.
+    let mut exact_failure = match lrclib_get::<Record>("/get", &exact, 0).await {
+        Ok(found) => {
+            if let Some(lyrics) = found.and_then(|record| record.lyrics()) {
+                return Ok(Some(lyrics));
+            }
+            None
+        }
+        Err(e) => Some(e),
+    };
+
+    let bare = bare_title(&title);
+    let mut titles = vec![title.as_str()];
+    if !bare.is_empty() && bare != title {
+        titles.push(bare.as_str());
     }
-    let candidates = lrclib_get::<Vec<Record>>("/search", &[("artist_name", artist.as_str()), ("track_name", title.as_str())])
-        .await?
-        .unwrap_or_default();
-    Ok(pick(candidates, query).and_then(|record| record.lyrics()))
+    let mut search_failure = None;
+    for track_name in titles {
+        let params = [("artist_name", artist.as_str()), ("track_name", track_name)];
+        match lrclib_get::<Vec<Record>>("/search", &params, BUSY_RETRIES).await {
+            Ok(candidates) => {
+                if let Some(lyrics) = pick(candidates.unwrap_or_default(), query).and_then(|record| record.lyrics()) {
+                    return Ok(Some(lyrics));
+                }
+            }
+            Err(e) => search_failure = Some(e),
+        }
+    }
+
+    // The search came up empty and the exact lookup never answered: give it
+    // the patience it skipped.
+    if exact_failure.is_some() {
+        exact_failure = match lrclib_get::<Record>("/get", &exact, BUSY_RETRIES).await {
+            Ok(found) => {
+                if let Some(lyrics) = found.and_then(|record| record.lyrics()) {
+                    return Ok(Some(lyrics));
+                }
+                None
+            }
+            Err(e) => Some(e),
+        };
+    }
+    match exact_failure.or(search_failure) {
+        Some(error) => Err(error),
+        None => Ok(None),
+    }
 }
 
-/// One LRCLIB request. A 404 or 400 just means there are no lyrics; a 429
-/// waits as long as LRCLIB asks (briefly) and tries again.
-async fn lrclib_get<T: DeserializeOwned>(path: &str, params: &[(&str, &str)]) -> Result<Option<T>, String> {
+/// A title with everything in brackets taken out, for a last search.
+fn bare_title(title: &str) -> String {
+    let mut out = String::with_capacity(title.len());
+    let mut depth = 0usize;
+    for c in title.chars() {
+        match c {
+            '(' | '[' | '（' | '【' => depth += 1,
+            ')' | ']' | '）' | '】' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// One LRCLIB request. A 404 or 400 just means there are no lyrics; a "slow
+/// down" (429) or "busy" (502-504) waits as long as LRCLIB asks, briefly, and
+/// tries again up to `retries` times.
+async fn lrclib_get<T: DeserializeOwned>(path: &str, params: &[(&str, &str)], retries: u32) -> Result<Option<T>, String> {
     let mut attempt = 0;
     let response = loop {
         let response = http()
@@ -203,7 +276,8 @@ async fn lrclib_get<T: DeserializeOwned>(path: &str, params: &[(&str, &str)]) ->
             .send()
             .await
             .map_err(|e| format!("Couldn't reach LRCLIB: {e}"))?;
-        if response.status() != reqwest::StatusCode::TOO_MANY_REQUESTS || attempt == RATE_LIMIT_RETRIES {
+        let busy = matches!(response.status().as_u16(), 429 | 502 | 503 | 504);
+        if !busy || attempt >= retries {
             break response;
         }
         let wait = response
@@ -540,11 +614,11 @@ fn cache_key(query: &Query) -> String {
 
 fn read_cache(path: &Path) -> Option<Option<Lyrics>> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    if modified.elapsed().unwrap_or(CACHE_LIFETIME) >= CACHE_LIFETIME {
-        return None;
-    }
+    let age = modified.elapsed().unwrap_or(CACHE_LIFETIME);
     let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str::<Cached>(&text).ok().map(|cached| cached.found)
+    let found = serde_json::from_str::<Cached>(&text).ok()?.found;
+    let lifetime = if found.is_some() { CACHE_LIFETIME } else { MISS_LIFETIME };
+    (age < lifetime).then_some(found)
 }
 
 fn write_cache(path: &Path, found: &Option<Lyrics>) {
@@ -590,6 +664,14 @@ mod tests {
         assert_eq!(clean_title("Song feat. Someone"), "Song");
         assert_eq!(clean_title("Rock - n - Roll"), "Rock - n - Roll");
         assert_eq!(clean_title("(Don't Fear) The Reaper"), "(Don't Fear) The Reaper");
+    }
+
+    #[test]
+    fn bare_titles_drop_every_bracket() {
+        assert_eq!(bare_title("Pass on (Vocal. Meursault)"), "Pass on");
+        assert_eq!(bare_title("Song [Live] (Remix)"), "Song");
+        assert_eq!(bare_title("曲名（ボーカル）"), "曲名");
+        assert_eq!(bare_title("No Brackets"), "No Brackets");
     }
 
     #[test]

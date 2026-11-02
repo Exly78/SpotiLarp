@@ -1,9 +1,12 @@
 <script>
   import { untrack } from "svelte";
   import { fade } from "svelte/transition";
-  import * as api from "../api.js";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { activeLine, fetchLyrics, lyricsKey } from "../lyrics.js";
+  import { notify } from "../toast.svelte.js";
   import { player, seekTo } from "../player.svelte.js";
   import { isEpisodeUri } from "../podcasts.svelte.js";
+  import { canRomanize, romanization, romanizeLabel, romanizeLines, setRomanized } from "../romanize.svelte.js";
 
   /** @type {{ visible?: boolean }} */
   let { visible = true } = $props();
@@ -26,30 +29,43 @@
   let manualScrollAt = 0;
   let wasVisible = false;
 
-  const activeIndex = $derived.by(() => {
-    if (!synced) return -1;
-    let idx = -1;
-    for (let i = 0; i < synced.length; i++) {
-      if (synced[i].time_ms <= player.positionMs) idx = i;
-      else break;
-    }
-    return idx;
-  });
+  const activeIndex = $derived(activeLine(synced, player.positionMs));
 
   const episode = $derived(isEpisodeUri(player.track?.uri));
+
+  /** The lines as written, before any romanizing. */
+  const sourceLines = $derived.by(() => {
+    if (synced) return synced.map((line) => line.text);
+    return plain ? plain.split("\n") : null;
+  });
+  const romanizable = $derived(!!sourceLines && canRomanize(sourceLines));
+  /** @type {string[]|null} */
+  let romanized = $state(null);
+
+  $effect(() => {
+    const lines = sourceLines;
+    romanized = null;
+    if (!lines || !romanizable || !romanization.on) return;
+    romanizeLines(lines)
+      .then((result) => {
+        if (sourceLines === lines) romanized = result;
+      })
+      .catch((e) => console.warn("Couldn't romanize the lyrics:", e));
+  });
 
   $effect(() => {
     const track = player.track;
     if (!track || !visible || episode) return;
-    const key = `${track.trackId ?? ""}::${track.name}::${track.artists}::${track.album}`;
+    const key = lyricsKey(track);
     if (key !== loadedFor) untrack(() => loadLyrics(track, key));
   });
 
   /**
    * @param {import("../player.svelte.js").CurrentTrack} track
    * @param {string} key
+   * @param {boolean} [recheck] ask again even if no lyrics were found last time
    */
-  async function loadLyrics(track, key) {
+  async function loadLyrics(track, key, recheck = false) {
     loadedFor = key;
     loading = true;
     error = "";
@@ -57,8 +73,7 @@
     plain = null;
     instrumental = false;
     try {
-      const firstArtist = track.artistList?.[0]?.name ?? track.artists.split(",")[0]?.trim() ?? track.artists;
-      const result = await api.getLyrics(track.trackId, track.name, firstArtist, track.album, track.durationMs);
+      const result = await fetchLyrics(track, recheck);
       if (loadedFor !== key) return;
       if (result) {
         instrumental = result.instrumental;
@@ -70,6 +85,17 @@
     } finally {
       if (loadedFor === key) loading = false;
     }
+  }
+
+  /** @param {boolean} [recheck] */
+  function retry(recheck = false) {
+    const track = player.track;
+    if (track) loadLyrics(track, lyricsKey(track), recheck);
+  }
+
+  /** @param {string} url */
+  function open(url) {
+    openUrl(url).catch((e) => notify(`Couldn't open the link: ${e}`));
   }
 
   /** @param {ScrollBehavior} behavior */
@@ -114,6 +140,20 @@
   bind:this={container}
   onwheel={onManualScroll}
 >
+  {#if romanizable && sourceLines}
+    <div class="tools">
+      <button
+        type="button"
+        class="romanize-toggle"
+        class:on={romanization.on}
+        aria-pressed={romanization.on}
+        onclick={() => setRomanized(!romanization.on)}
+        title={romanization.on ? "Show the lyrics as written" : "Show the lyrics in Latin letters"}
+      >
+        {romanizeLabel(sourceLines)}
+      </button>
+    </div>
+  {/if}
   {#if !player.track}
     <div class="empty-state" transition:fade={{ duration: 150 }}>Nothing playing.</div>
   {:else if episode}
@@ -125,7 +165,10 @@
       {/each}
     </ul>
   {:else if error}
-    <p class="status error" transition:fade={{ duration: 150 }}>{error}</p>
+    <div class="empty-state" transition:fade={{ duration: 150 }}>
+      <p class="status error">{error}</p>
+      <button type="button" class="retry" onclick={() => retry()}>Try again</button>
+    </div>
   {:else if instrumental}
     <div class="empty-state" transition:fade={{ duration: 150 }}>Instrumental, no lyrics.</div>
   {:else if synced}
@@ -139,18 +182,28 @@
           class:past={i < activeIndex}
           onclick={() => seekToLine(line.time_ms)}
         >
-          {line.text || " "}
+          {(romanized?.[i] ?? line.text) || " "}
         </button>
       {/each}
     </div>
   {:else if plain}
     <div class="plain-lyrics" transition:fade={{ duration: 150 }}>
-      {#each plain.split("\n") as line}
-        <p class="line">{line || " "}</p>
+      {#each plain.split("\n") as line, i}
+        <p class="line">{(romanized?.[i] ?? line) || " "}</p>
       {/each}
     </div>
   {:else}
-    <div class="empty-state" transition:fade={{ duration: 150 }}>No lyrics found for this track.</div>
+    <div class="empty-state" transition:fade={{ duration: 150 }}>
+      <p class="empty-title">No lyrics found for this track.</p>
+      <p class="contribute">
+        Know the words? Lyrics that Spotify doesn't have come from
+        <button type="button" class="inline-link" onclick={() => open("https://lrclib.net")}>LRCLIB</button>, a free
+        database anyone can add to. The easiest way is
+        <button type="button" class="inline-link" onclick={() => open("https://github.com/tranxuanthang/lrcget")}>LRCGET</button>,
+        a free app that can publish lyrics (synced to the song, too). Once they're up, they'll show here for everyone.
+      </p>
+      <button type="button" class="retry" onclick={() => retry(true)}>Check again</button>
+    </div>
   {/if}
 </div>
 
@@ -165,6 +218,33 @@
   border-radius: var(--radius-md);
   background-color: var(--avg-color, var(--surface-raised));
 }
+/* Pinned to the top corner as the lyrics scroll, without taking up a row. */
+.tools {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-self: flex-end;
+  height: 0;
+}
+.romanize-toggle {
+  padding: 0.35em 0.9em;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition);
+}
+.romanize-toggle:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+.romanize-toggle.on {
+  background: var(--text);
+  color: #000;
+}
 .empty-state {
   color: var(--text-muted);
   font-size: var(--fs-sm);
@@ -178,6 +258,43 @@
 }
 .status.error {
   color: var(--danger);
+}
+.empty-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  color: var(--text);
+}
+.contribute {
+  max-width: 420px;
+  margin: 0.8em auto 0;
+  line-height: 1.6;
+}
+.inline-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--fw-bold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.retry {
+  margin-top: 1em;
+  padding: 0.5em 1.2em;
+  border: 1px solid var(--text-muted);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.retry:hover {
+  border-color: var(--text);
 }
 .synced-lines,
 .plain-lyrics {

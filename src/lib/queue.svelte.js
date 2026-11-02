@@ -50,6 +50,26 @@ export function setLastPlayedLookup(lookup) {
   lastPlayedAt = lookup;
 }
 
+/**
+ * While listening in someone else's Jam, their app picks what plays: asking
+ * to play or queue something goes to it instead (jam.svelte.js).
+ * @typedef {Object} JamGuest
+ * @property {(tracks: Track[]) => void} add asks for songs to join the Jam's queue
+ * @property {(action: "toggle"|"next"|"previous"|"seek", positionMs?: number) => void} control
+ * @property {() => void} resync plays what the Jam is playing, from where it's got to
+ * @property {() => boolean} canControl whether the host lets listeners pause and skip
+ */
+/** @type {JamGuest|null} */
+let guest = null;
+
+/** @param {JamGuest|null} jamGuest */
+export function setJamGuest(jamGuest) {
+  guest = jamGuest;
+}
+
+/** The Jam you're listening in on, if any. */
+export const jamGuest = () => guest;
+
 function readSaved() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
@@ -239,6 +259,7 @@ async function fetchAutoplay() {
 }
 
 export function hasNext() {
+  if (guest) return guest.canControl();
   return queue.manual.length > 0 || nextContextPosition() >= 0 || canAutoplay();
 }
 
@@ -277,6 +298,7 @@ export function upcomingContext(limit) {
 
 /** @param {number} [positionMs] 0 starts an episode where you left off */
 export async function playCurrent(positionMs = 0) {
+  if (guest) return guest.resync();
   const track = queue.current;
   if (!track) return;
   persist();
@@ -296,6 +318,8 @@ export async function playCurrent(positionMs = 0) {
  * @param {View|null} [contextView] the page the list belongs to
  */
 export async function playFromList(list, index, contextName = "", contextView = null) {
+  // A listener picking a song puts it in the Jam's queue.
+  if (guest) return guest.add(list.slice(Math.max(index, 0), Math.max(index, 0) + 1));
   contextVersion++;
   queue.contextView = contextView;
   if (contextView) markPlayed(contextView);
@@ -311,6 +335,7 @@ export async function playFromList(list, index, contextName = "", contextView = 
 }
 
 export async function next() {
+  if (guest) return guest.control("next");
   if (queue.manual.length > 0) {
     queue.current = /** @type {Track} */ (queue.manual.shift());
     queue.fromManual = true;
@@ -330,6 +355,7 @@ export async function next() {
 }
 
 export async function previous() {
+  if (guest) return guest.control("previous");
   if (!hasPrevious()) return;
   if (!queue.fromManual) {
     queue.position = queue.position > 0 ? queue.position - 1 : queue.order.length - 1;
@@ -349,18 +375,23 @@ export function playNext(track) {
   playManyNext([track]);
 }
 
-/** @param {Track[]} tracks in the order they should play */
-export function addManyToQueue(tracks) {
+/**
+ * @param {Track[]} tracks in the order they should play
+ * @param {boolean} [announce] false when the caller says what happened itself
+ */
+export function addManyToQueue(tracks, announce = true) {
   if (tracks.length === 0) return;
+  if (guest) return guest.add(tracks);
   // Not push(...tracks): a big playlist would be too many arguments.
   queue.manual = [...queue.manual, ...tracks];
   persist();
-  notify(tracks.length === 1 ? "Added to queue" : `Added ${tracks.length} songs to queue`);
+  if (announce) notify(tracks.length === 1 ? "Added to queue" : `Added ${tracks.length} songs to queue`);
 }
 
 /** @param {Track[]} tracks in the order they should play */
 export function playManyNext(tracks) {
   if (tracks.length === 0) return;
+  if (guest) return guest.add(tracks);
   queue.manual = [...tracks, ...queue.manual];
   persist();
   notify(tracks.length === 1 ? "Playing next" : `Playing ${tracks.length} songs next`);
@@ -437,6 +468,8 @@ export async function skipToContext(position) {
 
 listen("player-event", (event) => {
   const type = /** @type {import("./types.js").PlaybackEvent} */ (event.payload).type;
+  // In a Jam the host's app says what plays next.
+  if (guest) return;
   if (type === "Playing") {
     unavailableStreak = 0;
   } else if (type === "Unavailable") {

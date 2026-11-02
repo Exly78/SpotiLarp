@@ -104,6 +104,28 @@ Produces a release binary and installer(s) for your platform under
   SpotiLarp, so it keeps its own list (a song counts after 30 seconds, or half of a shorter
   one) and shows it next to Spotify's history under Queue → Recent. Clear it in Settings →
   Storage.
+- **Jam: listen together.** Open Jam (the people button next to the queue, or `J`), start one
+  and send friends the code; they paste it into their SpotiLarp under Jam → Join. Everyone
+  hears the same songs at the same place on their own computer, so each person needs SpotiLarp
+  and Spotify Premium. Listeners can add songs (playing or queueing anything adds it to the
+  Jam), and the host decides whether they can, whether songs wait for the host to accept them,
+  and whether listeners can pause and skip for everyone; the host can also remove people and
+  end the Jam. Anyone can save what played as a playlist. With Discord Rich Presence on, your
+  status gets a **Listen along on SpotiLarp** button (and a **Get SpotiLarp** one): friends who
+  click it hear what you're playing straight away but can't add songs, and you get a popup to
+  make it a Jam with them (or keep them just listening, or remove them). The button opens a small page (`docs/listen`, served by GitHub
+  Pages) that passes the code to SpotiLarp as a `spotilarp://` link. The apps connect straight to each
+  other using [iroh](https://www.iroh.computer); when a router won't allow that, the
+  (encrypted) traffic goes through iroh's free public relays, which is also how a code finds
+  its Jam. Nobody has to run a server. Windows may ask once whether SpotiLarp can use the
+  network. Songs from Local Files aren't shared: listeners pause until the host plays a
+  Spotify song again.
+- **Discord status:** the Discord menu in the top bar turns on "Listening to SpotiLarp" on your
+  Discord profile, nothing to set up.
+- **Connect Discord** (in the Discord menu in the top bar) links your Discord account through
+  Discord's own sign-in page, for Discord features to come. SpotiLarp only asks to know who you
+  are (name, @username, picture). The login is kept in your OS keychain, and Disconnect tells
+  Discord to drop SpotiLarp's access too.
 - **It gets lighter in the background.** About 30 seconds after the window is minimized or
   sent to the tray, SpotiLarp lets go of its interface and asks WebView2 to trim itself
   (in our tests about 20 MB instead of about 100 MB with the window open). Music, the queue and
