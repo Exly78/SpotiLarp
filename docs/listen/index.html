@@ -1,0 +1,191 @@
+<!doctype html>
+<!--
+  Where a SpotiLarp "Listen along on SpotiLarp" button on Discord leads
+  (Discord buttons can only open web links). It hands the code after the # to
+  SpotiLarp as spotilarp://listen/<code>; the song after the code
+  (#<code>/track/<id>) is offered on Spotify to anyone without SpotiLarp. What
+  comes after a # stays in the browser, it's never sent to the server.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Listen along · SpotiLarp</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121212;
+        --card: #1e1e1e;
+        --text: #ffffff;
+        --muted: #a7a7a7;
+        --accent: #1ed760;
+        --accent-hover: #3be477;
+        --border: rgba(255, 255, 255, 0.14);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Circular Std", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 420px;
+        padding: 32px 28px;
+        border-radius: 12px;
+        background: var(--card);
+        text-align: center;
+      }
+      .dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .brand {
+        margin: 0 0 24px;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0 0 16px;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      .open {
+        display: inline-block;
+        margin: 8px 0 24px;
+        padding: 12px 28px;
+        border: none;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #000;
+        font: inherit;
+        font-size: 15px;
+        font-weight: 700;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .open:hover {
+        background: var(--accent-hover);
+      }
+      .code-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 20px;
+      }
+      code {
+        flex: 1;
+        min-width: 0;
+        padding: 9px 10px;
+        border-radius: 4px;
+        background: #121212;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        user-select: all;
+      }
+      .copy {
+        flex-shrink: 0;
+        padding: 6px 14px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: none;
+        color: var(--text);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .copy:hover {
+        border-color: var(--text);
+      }
+      a {
+        color: var(--text);
+      }
+      .small {
+        margin: 0;
+        font-size: 12px;
+      }
+      .spotify {
+        margin-top: 12px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><span class="dot"></span>SpotiLarp</div>
+
+      <div id="ready" hidden>
+        <h1>Listen along</h1>
+        <p>Opening SpotiLarp. If your browser asks, let it open the app.</p>
+        <a class="open" id="open" href="#">Open SpotiLarp</a>
+        <p class="small">Or paste this code in SpotiLarp under Jam → Join:</p>
+        <div class="code-row">
+          <code id="code"></code>
+          <button type="button" class="copy" id="copy">Copy</button>
+        </div>
+        <p class="small">
+          Don't have SpotiLarp?
+          <a href="https://github.com/Exly78/SpotiLarp/releases/latest">Download it</a> (Windows). You'll also need
+          Spotify Premium.
+        </p>
+        <p class="small spotify" id="spotify" hidden>
+          Or <a id="spotify-link" href="#">listen to this song on Spotify</a> instead.
+        </p>
+      </div>
+
+      <div id="broken" hidden>
+        <h1>This link is missing its code</h1>
+        <p>Ask your friend for a new one, or click the Listen along button on their Discord status again.</p>
+      </div>
+    </main>
+
+    <script>
+      const [code, kind, id] = decodeURIComponent(location.hash.slice(1)).split("/");
+      if ((kind === "track" || kind === "episode") && /^[A-Za-z0-9]{22}$/.test(id ?? "")) {
+        document.getElementById("spotify-link").href = `https://open.spotify.com/${kind}/${id}`;
+        document.getElementById("spotify").hidden = false;
+      }
+      if (/^[A-Za-z0-9_-]{43}$/.test(code ?? "")) {
+        const appLink = "spotilarp://listen/" + code;
+        document.getElementById("ready").hidden = false;
+        document.getElementById("code").textContent = code;
+        document.getElementById("open").href = appLink;
+        document.getElementById("copy").addEventListener("click", async (event) => {
+          try {
+            await navigator.clipboard.writeText(code);
+            event.target.textContent = "Copied";
+          } catch {
+            event.target.textContent = "Select it";
+          }
+        });
+        location.href = appLink;
+      } else {
+        document.getElementById("broken").hidden = false;
+      }
+    </script>
+  </body>
+</html>
