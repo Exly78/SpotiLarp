@@ -1,11 +1,11 @@
 {
-  "version": "1.1.0",
-  "notes": "Podcasts: follow shows, browse their episodes and pick up where you left off, with Continue listening and New episodes on Home. Smart shuffle (click shuffle twice), radio for any song, album, playlist or artist, and themes, including Spicetify color schemes (Settings → Appearance). Your listening history under Queue → Recent; playlist folders and new filters in Your Library; select several songs to queue, drag, copy or paste them; Spotify's own synced lyrics; keyboard shortcuts (press ?), zoom, command-line control and taskbar buttons. SpotiLarp now uses about 20 MB in the background, asks Spotify for far less, and reconnects playback by itself.",
-  "pub_date": "2026-10-17T21:25:53Z",
+  "version": "1.2.0",
+  "notes": "Jam: listen together with friends, and Listen along straight from your Discord status. The Now Playing panel now shows the artist (photo, monthly listeners, bio), live lyrics, the song's credits, upcoming concerts, what's next in the queue, and Spotify's looping Canvas videos. Romanized lyrics (romaji for Japanese, Korean, pinyin and more), lyrics found more reliably, a new account menu with your Spotify and Discord accounts, and profile pages. SpotiLarp also spaces out what it asks Spotify and stays logged in if Spotify asks it to wait, instead of getting locked out.",
+  "pub_date": "2026-11-02T15:08:23Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNjVDYWJxeTVlSUI4YlNwZHNhVXBLZ2NjWk9LTTQ0Z3BBK0Q2aTFQU1pUWDVWeDdsOXFraGxDYmpOSW4wWGNOemVJTTBXTUpmSjFqdWRtUnNYejhMZ28yMFFnZHNnUWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyMjcyOTUwCWZpbGU6U3BvdGlMYXJwXzEuMS4wX3g2NC1zZXR1cC5leGUKNkVPQ3RxeVZmdCtOTHhpcEJ3NGF6T1JHUEJOd2xCV1lycVprZkUzUW1PNVpWdmVxdk5PcU93RGhvc1V1VGZvZElKM2lyeVZROEZvMmlWVjZZTkhFRHc9PQo=",
-      "url": "https://github.com/Exly78/SpotiLarp/releases/download/v1.1.0/SpotiLarp_1.1.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNjVDYWJxeTVlSUhOSVFjczdyNzZkek5uRjdCUHFqRkU5ZXFBOW5BUXpsZmNEcVQxVVZCdXp2ZHMvQ1NGSExCKzNGR2FObDRZZENOR1gxOEgyNEhQMzNuNzdVL0t2dUFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNjMyMDc3CWZpbGU6U3BvdGlMYXJwXzEuMi4wX3g2NC1zZXR1cC5leGUKUUpKM1dMSUpzMHlUUm5Pbnd4ZkhkVHBEMEVYWFpkemFmNHhreCtjTzVBUC94c1ZGVmRwVXNnc2NkWkxQK3RGVHpWZ2FjYnVMUnJ4Y3BkSTUyMmpCQ1E9PQo=",
+      "url": "https://github.com/Exly78/SpotiLarp/releases/download/v1.2.0/SpotiLarp_1.2.0_x64-setup.exe"
     }
   }
 }
