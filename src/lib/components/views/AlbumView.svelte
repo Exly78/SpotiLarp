@@ -83,6 +83,9 @@
       {#if album?.release_date} · {releaseYear(album.release_date)}{/if}
       · {album?.tracks.length} {album?.tracks.length === 1 ? "song" : "songs"}, {formatDuration(totalMs)}
     {/snippet}
+    {#snippet sticky()}
+      <PlayButton size={48} onclick={playAll} label={`Play ${album?.name}`} />
+    {/snippet}
     {#snippet actions()}
       <PlayButton onclick={playAll} label={`Play ${album?.name}`} />
       <button

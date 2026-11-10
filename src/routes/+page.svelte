@@ -165,6 +165,17 @@
     }
   }
 
+  function clearSearch() {
+    clearTimeout(debounceHandle);
+    searchToken++;
+    showDropdown = false;
+    searchQuery = "";
+    searchResults = [];
+    resultsFor = "";
+    highlighted = -1;
+    searchInput?.focus();
+  }
+
   /** @param {number} index */
   function pickResult(index) {
     playFromList(shownResults, index, `Search: "${searchQuery.trim()}"`);
@@ -612,9 +623,6 @@
 <svelte:window onclick={onWindowClick} onkeydown={onWindowKeydown} onmouseup={onWindowMouseUp} />
 
 <div class="shell">
-{#if !miniMode}
-  <UpdateBanner />
-{/if}
 
 {#if miniMode}
   <MiniPlayer onExpand={() => setMiniMode(false)} />
@@ -639,17 +647,18 @@
       </button>
       <button
         type="button"
-        class="panel-toggle"
+        class="home-button"
         class:active={nav.view.type === "home" && !nav.lyrics}
         onclick={() => navigate({ type: "home" })}
         aria-label="Home"
+        title="Home"
       >
-        <Icon name="home" size={18} />
+        <Icon name="home" size={24} />
       </button>
 
       <div class="search-box" bind:this={searchBox} data-tauri-drag-region="false">
         <div class="search-bar">
-          <Icon name="search" size={18} class="search-icon" />
+          <Icon name="search" size={22} class="search-icon" />
           <input
             type="text"
             placeholder="Search (Ctrl+F)"
@@ -661,6 +670,11 @@
             class="search-input"
             spellcheck="false"
           />
+          {#if searchQuery}
+            <button type="button" class="search-clear" onclick={clearSearch} aria-label="Clear search" title="Clear">
+              <Icon name="close" size={16} />
+            </button>
+          {/if}
         </div>
         {#if showDropdown && searchQuery.trim()}
           <div class="search-dropdown">
@@ -702,6 +716,7 @@
 
     <div class="topbar-right">
     <div class="account-controls">
+      <UpdateBanner />
       {#if rateLimit.until > 0}
         <span
           class="rate-limit-pill"
@@ -1088,7 +1103,7 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 1em;
-  padding: 0.75em 1.25em;
+  padding: 0.5em 1.25em;
   background: var(--bg);
 }
 
@@ -1125,19 +1140,67 @@ h1 {
 .search-bar {
   display: flex;
   align-items: center;
-  gap: 0.6em;
+  gap: 0.75em;
+  height: 48px;
   border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  padding: 0.6em 1.1em;
+  padding: 0 0.75em 0 0.9em;
   background-color: var(--control-bg);
-  transition: border-color var(--transition), background-color var(--transition);
+  /* The outline is drawn inside, so the bar doesn't change size with it. */
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow var(--transition), background-color var(--transition);
 }
 .search-bar:hover {
   background-color: var(--control-hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 .search-bar:focus-within {
-  border-color: var(--text);
   background-color: var(--control-bg);
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+.search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition), background-color var(--transition);
+}
+.search-clear:hover {
+  color: var(--text);
+  background-color: var(--surface-hover);
+}
+.home-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--control-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition), transform 100ms ease;
+}
+.home-button:hover {
+  background: var(--control-hover);
+  color: var(--text);
+  transform: scale(1.04);
+}
+.home-button:active {
+  transform: scale(0.96);
+}
+.home-button.active {
+  color: var(--text);
 }
 :global(.search-icon) {
   color: var(--text-muted);
@@ -1148,7 +1211,7 @@ h1 {
   min-width: 0;
   border: none;
   padding: 0;
-  font-size: var(--fs-sm);
+  font-size: 1em;
   font-family: inherit;
   color: var(--text);
   background: transparent;
@@ -1162,9 +1225,10 @@ h1 {
   top: calc(100% + 0.4em);
   left: 0;
   right: 0;
-  background: var(--surface-raised);
+  padding: 4px;
+  background: var(--surface-hover);
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 24px rgba(0, 0, 0, 0.3), 0 6px 8px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   z-index: 20;
   max-height: 70vh;
@@ -1185,6 +1249,7 @@ h1 {
   width: 100%;
   padding: 0.5em 0.7em;
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
   cursor: pointer;
   text-align: left;
@@ -1194,7 +1259,7 @@ h1 {
 }
 .dropdown-item:hover,
 .dropdown-item.highlighted {
-  background-color: var(--surface-hover);
+  background-color: var(--highlight-strong);
 }
 .dropdown-thumb {
   width: 36px;
@@ -1249,14 +1314,19 @@ h1 {
   align-self: stretch;
 }
 .topbar-right > :global(.window-controls) {
-  margin: -0.75em -1.25em -0.75em 0;
+  margin: -0.5em -1.25em -0.5em 0;
 }
 
 .account-controls {
   display: flex;
   align-items: center;
-  gap: 0.75em;
+  gap: 0.5em;
   justify-content: flex-end;
+}
+/* The account picture comes last, after the buttons, set a little apart. */
+.account-controls > :global(.account-menu) {
+  order: 1;
+  margin-left: 0.25em;
 }
 
 @media (max-width: 1679px) {
@@ -1363,12 +1433,12 @@ h1 {
   cursor: pointer;
 }
 .menu-row:hover {
-  background: var(--surface-hover);
+  background: var(--highlight-strong);
 }
 .menu-divider {
   height: 1px;
   margin: 0.1em 0;
-  background: var(--surface-hover);
+  background: var(--border-strong);
 }
 .menu-link {
   align-self: flex-start;
@@ -1437,7 +1507,9 @@ h1 {
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 1.5em 2em;
+  --content-pad-x: 2em;
+  --content-pad-y: 1.5em;
+  padding: var(--content-pad-y) var(--content-pad-x);
   overflow: hidden;
   display: flex;
   background: var(--main-bg);
@@ -1499,13 +1571,11 @@ h1 {
 }
 
 .pill-button.primary {
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+  background-color: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
 }
 .pill-button.primary:hover {
-  background-color: var(--accent-hover);
-  border-color: var(--accent-hover);
   transform: scale(1.04);
 }
 

@@ -34,7 +34,7 @@
   });
 </script>
 
-<Section {title}>
+<Section {title} grid bind:gridRef={grid} onTitleClick={onShowAll} before={controls}>
   {#snippet action()}
     {#if onShowAll}
       <button type="button" class="show-all" onclick={onShowAll}>Show all</button>
@@ -44,22 +44,14 @@
       </button>
     {/if}
   {/snippet}
-  {@render controls?.()}
-  <div class="grid" bind:this={grid}>
-    {#each shown as item, i}
-      {@render card(item, i)}
-    {/each}
-  </div>
+  {#each shown as item, i}
+    {@render card(item, i)}
+  {/each}
 </Section>
 
 <style>
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 0.25em;
-  margin: 0 -0.75em;
-}
 .show-all {
+  flex-shrink: 0;
   padding: 0;
   border: none;
   background: none;

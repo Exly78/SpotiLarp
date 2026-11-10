@@ -143,8 +143,8 @@
   width: 300px;
   padding: 1em;
   border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  background: var(--surface-hover);
+  box-shadow: 0 16px 24px rgba(0, 0, 0, 0.3), 0 6px 8px rgba(0, 0, 0, 0.2);
 }
 .intro {
   margin: 0;
@@ -164,7 +164,7 @@
   flex-shrink: 0;
   border-radius: 50%;
   object-fit: cover;
-  background: var(--control-bg);
+  background: var(--highlight-strong);
 }
 .who {
   flex: 1;
@@ -290,6 +290,7 @@
 .panel-toggle:hover {
   background-color: var(--surface-hover);
   color: var(--text);
+  transform: scale(1.04);
 }
 .panel-toggle.active {
   color: var(--accent);

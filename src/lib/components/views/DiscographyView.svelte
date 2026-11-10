@@ -9,6 +9,7 @@
   import { untrack } from "svelte";
   import * as api from "../../api.js";
   import { openAlbum, openArtist } from "../../nav.svelte.js";
+  import { playAlbum } from "../../collections.js";
   import { coverAtLeast, releaseType, releaseYear } from "../../utils.js";
   import MediaCard from "../MediaCard.svelte";
   import Section from "../Section.svelte";
@@ -86,6 +87,7 @@
         title={release.name}
         subtitle={[releaseYear(release.release_date), releaseType(release.album_type)].filter(Boolean).join(" • ")}
         onclick={() => openAlbum(release)}
+        onplay={() => playAlbum(release)}
       />
     {/each}
   </Section>

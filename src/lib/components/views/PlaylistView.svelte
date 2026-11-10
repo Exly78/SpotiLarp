@@ -219,6 +219,9 @@
       {tracks.length} {tracks.length === 1 ? "song" : "songs"} · {formatDuration(totalMs)}
     {/if}
   {/snippet}
+  {#snippet sticky()}
+    <PlayButton size={48} onclick={playAll} disabled={loading || visibleTracks.length === 0} label={`Play ${playlist.name}`} />
+  {/snippet}
   {#snippet actions()}
     <PlayButton onclick={playAll} disabled={loading || visibleTracks.length === 0} label={`Play ${playlist.name}`} />
     <ShuffleButton />

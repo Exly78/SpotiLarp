@@ -109,16 +109,21 @@ export function openProfile(user) {
   if (user.id) navigate({ type: "profile", id: user.id, name: user.name });
 }
 
+/**
+ * @param {import("./types.js").PlaylistCard} card
+ * @returns {import("./types.js").Playlist}
+ */
+export function playlistFromCard(card) {
+  return {
+    id: card.id,
+    name: card.name,
+    images: card.images,
+    track_count: { total: 0 },
+    owner: card.owner ? { id: "", display_name: card.owner } : null,
+  };
+}
+
 /** @param {import("./types.js").PlaylistCard} card */
 export function openPlaylistCard(card) {
-  navigate({
-    type: "playlist",
-    playlist: {
-      id: card.id,
-      name: card.name,
-      images: card.images,
-      track_count: { total: 0 },
-      owner: card.owner ? { id: "", display_name: card.owner } : null,
-    },
-  });
+  navigate({ type: "playlist", playlist: playlistFromCard(card) });
 }

@@ -99,15 +99,19 @@
 .lyrics-wrap.hidden {
   display: none;
 }
+/* Scrolls from edge to edge of the panel: .content-area's padding (+page.svelte)
+   moves in here, so a page's header can reach the edges and the scrollbar sits
+   on the panel's side. Its own stacking context keeps header colors behind the page. */
 .results-area {
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
-  padding-right: 0.25em;
+  margin: calc(-1 * var(--content-pad-y)) calc(-1 * var(--content-pad-x));
+  padding: var(--content-pad-y) var(--content-pad-x);
+  isolation: isolate;
 }
-/* Cancels .content-area's padding (+page.svelte); the view pads itself. */
+/* The view pads itself. */
 .results-area.full-bleed {
-  margin: -1.5em -2em;
-  padding-right: 0;
+  padding: 0;
 }
 </style>

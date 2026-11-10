@@ -12,7 +12,8 @@
   import * as api from "../../api.js";
   import { queue, playFromList, toggleShuffle, shuffleMode, shuffleLabels } from "../../queue.svelte.js";
   import { player, togglePlay } from "../../player.svelte.js";
-  import { openAlbum, openArtist, openDiscography, openPlaylistCard, openRadio } from "../../nav.svelte.js";
+  import { openAlbum, openArtist, openDiscography, openPlaylistCard, openRadio, playlistFromCard } from "../../nav.svelte.js";
+  import { playAlbum, playPlaylist } from "../../collections.js";
   import { notify } from "../../toast.svelte.js";
   import { dominantColor, tintFromHex } from "../../colors.js";
   import { coverAtLeast, formatCount, htmlToText, releaseType, releaseYear } from "../../utils.js";
@@ -286,6 +287,7 @@
               title={release.name}
               subtitle={releaseSubtitle(release)}
               onclick={() => openAlbum(release)}
+              onplay={() => playAlbum(release)}
             />
           {/snippet}
           {#snippet controls()}
@@ -315,6 +317,7 @@
               title={playlist.name}
               subtitle={playlistSubtitle(playlist)}
               onclick={() => openPlaylistCard(playlist)}
+              onplay={() => playPlaylist(playlistFromCard(playlist))}
             />
           {/snippet}
         </Shelf>
@@ -342,6 +345,7 @@
               title={release.name}
               subtitle={releaseSubtitle(release)}
               onclick={() => openAlbum(release)}
+              onplay={() => playAlbum(release)}
             />
           {/snippet}
         </Shelf>
@@ -356,6 +360,7 @@
                 title={playlist.name}
                 subtitle={playlistSubtitle(playlist)}
                 onclick={() => openPlaylistCard(playlist)}
+                onplay={() => playPlaylist(playlistFromCard(playlist))}
               />
             {/snippet}
           </Shelf>

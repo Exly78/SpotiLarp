@@ -9,7 +9,8 @@
 <script>
   import { onMount, untrack } from "svelte";
   import * as api from "../../api.js";
-  import { navigate, openArtist, openPlaylistCard, openProfile } from "../../nav.svelte.js";
+  import { navigate, openArtist, openPlaylistCard, openProfile, playlistFromCard } from "../../nav.svelte.js";
+  import { playPlaylist } from "../../collections.js";
   import { coverAtLeast, formatCount } from "../../utils.js";
   import { cached, MINUTE } from "../../requestCache.js";
   import PageHeader from "../PageHeader.svelte";
@@ -72,14 +73,14 @@
   }
 
   /** @param {ProfilePlaylist} playlist */
-  function openPlaylist(playlist) {
-    openPlaylistCard({
+  function playlistCard(playlist) {
+    return {
       id: playlist.id,
       name: playlist.name,
       description: "",
       images: playlist.images.slice(0, 1).map((url) => ({ url, width: null, height: null })),
       owner: playlist.owner,
-    });
+    };
   }
 
   /** @param {number} n @param {string} one @param {string} many */
@@ -137,7 +138,8 @@
           image={playlist.images[0] ?? null}
           title={playlist.name}
           subtitle={playlist.owner ? `By ${playlist.owner}` : "Playlist"}
-          onclick={() => openPlaylist(playlist)}
+          onclick={() => openPlaylistCard(playlistCard(playlist))}
+          onplay={() => playPlaylist(playlistFromCard(playlistCard(playlist)))}
         />
       {/snippet}
     </Shelf>

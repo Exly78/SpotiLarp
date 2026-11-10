@@ -99,6 +99,9 @@
     Songs Spotify picked to go with {name}
     {#if !loading && tracks.length > 0} · {tracks.length} songs, {formatDuration(totalMs)}{/if}
   {/snippet}
+  {#snippet sticky()}
+    <PlayButton size={48} onclick={playAll} disabled={loading || tracks.length === 0} label={`Play ${title}`} />
+  {/snippet}
   {#snippet actions()}
     <PlayButton onclick={playAll} disabled={loading || tracks.length === 0} label={`Play ${title}`} />
     <ShuffleButton />

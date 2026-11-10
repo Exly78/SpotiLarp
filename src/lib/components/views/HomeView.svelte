@@ -10,6 +10,7 @@
   import { playFromList } from "../../queue.svelte.js";
   import { library } from "../../library.svelte.js";
   import { navigate, openArtist, openShow } from "../../nav.svelte.js";
+  import { playPlaylist } from "../../collections.js";
   import { episodeTrack, continueListening, isPlayed } from "../../podcasts.svelte.js";
   import { coverAtLeast, smallestCover } from "../../utils.js";
   import { cached, MINUTE } from "../../requestCache.js";
@@ -191,6 +192,7 @@
       title="Liked Songs"
       subtitle="Playlist"
       onclick={() => navigate({ type: "playlist", playlist: likedSongs })}
+      onplay={() => playPlaylist(likedSongs)}
     />
     {#each library.playlists.slice(0, PLAYLIST_CARDS) as playlist (playlist.id)}
       <MediaCard
@@ -198,6 +200,7 @@
         title={playlist.name}
         subtitle={playlist.owner?.display_name ? `By ${playlist.owner.display_name}` : "Playlist"}
         onclick={() => navigate({ type: "playlist", playlist })}
+        onplay={() => playPlaylist(playlist)}
       />
     {/each}
   </Section>

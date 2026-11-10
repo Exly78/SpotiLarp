@@ -171,6 +171,15 @@
     {#snippet meta()}
       {total} {total === 1 ? "episode" : "episodes"}
     {/snippet}
+    {#snippet sticky()}
+      <PlayButton
+        size={48}
+        onclick={play}
+        playing={playingHere && player.isPlaying}
+        disabled={loading || (shown.length === 0 && !playingHere)}
+        label={`Play ${title}`}
+      />
+    {/snippet}
     {#snippet actions()}
       <PlayButton
         onclick={play}

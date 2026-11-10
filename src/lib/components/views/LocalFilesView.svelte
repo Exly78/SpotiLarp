@@ -72,6 +72,9 @@
       · {localFiles.skipped} {localFiles.skipped === 1 ? "file" : "files"} couldn't be read
     {/if}
   {/snippet}
+  {#snippet sticky()}
+    <PlayButton size={48} onclick={playAll} disabled={visibleTracks.length === 0} label={`Play ${NAME}`} />
+  {/snippet}
   {#snippet actions()}
     <PlayButton onclick={playAll} disabled={visibleTracks.length === 0} label={`Play ${NAME}`} />
     {#if localFiles.folders.length > 0}

@@ -56,13 +56,14 @@
 .account-menu {
   position: relative;
 }
+/* A dark ring around the picture, as Spotify has. */
 .avatar {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
+  width: 48px;
+  height: 48px;
+  padding: 8px;
   border: none;
   border-radius: 50%;
   background: var(--control-bg);
@@ -75,8 +76,11 @@
   transition: background-color var(--transition), transform 100ms ease;
 }
 .avatar:hover {
-  background: var(--surface-hover);
-  transform: scale(1.05);
+  background: var(--control-hover);
+  transform: scale(1.04);
+}
+.avatar:active {
+  transform: scale(0.96);
 }
 .avatar-image {
   width: 100%;
@@ -95,7 +99,7 @@
   min-width: 260px;
   padding: 1em;
   border-radius: var(--radius-md);
-  background: var(--surface-raised);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  background: var(--surface-hover);
+  box-shadow: 0 16px 24px rgba(0, 0, 0, 0.3), 0 6px 8px rgba(0, 0, 0, 0.2);
 }
 </style>

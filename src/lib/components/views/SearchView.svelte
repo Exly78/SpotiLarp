@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import * as api from "../../api.js";
   import { openArtist, openAlbum, openShow } from "../../nav.svelte.js";
+  import { playAlbum } from "../../collections.js";
   import { episodeTrack } from "../../podcasts.svelte.js";
   import { notify } from "../../toast.svelte.js";
   import { coverAtLeast, releaseYear } from "../../utils.js";
@@ -93,6 +94,7 @@
             .filter(Boolean)
             .join(" · ")}
           onclick={() => openAlbum(album)}
+          onplay={() => playAlbum(album)}
         />
       {/each}
     </Section>
