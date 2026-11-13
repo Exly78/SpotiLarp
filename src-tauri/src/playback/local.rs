@@ -10,7 +10,7 @@ use librespot_playback::config::VolumeCtrl;
 use librespot_playback::mixer::mappings::MappedCtrl;
 use librespot_playback::mixer::MixerConfig;
 use rodio::source::SeekError;
-use rodio::{ChannelCount, Decoder, OutputStream, Sample, SampleRate, Sink, Source};
+use rodio::{ChannelCount, Decoder, Sample, SampleRate, Sink, Source};
 use tauri::{AppHandle, Manager};
 
 use super::equalizer;
@@ -94,7 +94,7 @@ struct Loaded {
 struct Engine {
     app: AppHandle,
     volume_ctrl: VolumeCtrl,
-    output: Option<(OutputStream, u64)>,
+    output: Option<(sink::Output, u64)>,
     loaded: Option<Loaded>,
     last_position_event: Instant,
 }
@@ -189,9 +189,16 @@ impl Engine {
         }
     }
 
-    fn output(&mut self) -> Result<&OutputStream, String> {
+    /// Whether the output went to another device, or its device failed.
+    fn output_lost(&self) -> bool {
+        self.output
+            .as_ref()
+            .is_some_and(|(output, opened)| *opened != sink::output_generation() || output.failed())
+    }
+
+    fn output(&mut self) -> Result<&sink::Output, String> {
         let generation = sink::output_generation();
-        if self.output.as_ref().is_none_or(|(_, opened)| *opened != generation) {
+        if self.output.is_none() || self.output_lost() {
             self.output = None;
             self.output = Some((sink::open_stream().map_err(|e| e.to_string())?, generation));
         }
@@ -235,11 +242,7 @@ impl Engine {
         let Some(loaded) = &self.loaded else {
             return;
         };
-        let device_changed = self
-            .output
-            .as_ref()
-            .is_some_and(|(_, opened)| *opened != sink::output_generation());
-        if device_changed && !loaded.ended {
+        if self.output_lost() && !loaded.ended {
             if self.restart_at(self.position_ms()).is_err() {
                 self.publish(PlaybackEvent::Unavailable);
             }
