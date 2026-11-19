@@ -145,6 +145,9 @@ Produces a release binary and installer(s) for your platform under
   default back.
 - **Logins are stored in your OS keychain** (Windows Credential Manager, macOS Keychain,
   Secret Service on Linux). Logging out removes both the library and the playback login.
+  Linux setups with no Secret Service running (no gnome-keyring, KWallet or KeePassXC, as
+  on many OpenRC systems) keep them in `~/.config/SpotiLarp/logins.json` instead, readable
+  only by you, and move into a Secret Service the next time they're saved with one running.
 
 ## Controlling it from the command line
 

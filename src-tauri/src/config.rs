@@ -3,11 +3,13 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+/// SpotiLarp's folder in the OS config dir.
+pub fn dir() -> PathBuf {
+    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("SpotiLarp")
+}
+
 fn config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("SpotiLarp")
-        .join("config.json")
+    dir().join("config.json")
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

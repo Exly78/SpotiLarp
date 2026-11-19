@@ -4,7 +4,6 @@
 //! same app asking. For now it's who you are (name, @username, picture); later
 //! features ask for more.
 
-use keyring::Entry;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -14,6 +13,7 @@ use url::Url;
 use crate::auth::{loopback, pkce, REDIRECT_PORT};
 use crate::config;
 use crate::discord::SPOTILARP_APP_ID;
+use crate::secret_store;
 
 // SpotiLarp's Discord app (discord.rs) needs, in its OAuth2 settings, Public
 // Client on and http://127.0.0.1:8898/discord as a redirect.
@@ -219,20 +219,15 @@ fn profile(user: DiscordUser) -> DiscordProfile {
 }
 
 fn save_refresh_token(token: &str) -> Result<(), String> {
-    let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())?;
-    entry.set_password(token).map_err(|e| e.to_string())
+    secret_store::save(KEYRING_SERVICE, KEYRING_USER, token)
 }
 
 fn load_refresh_token() -> Option<String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()?.get_password().ok()
+    secret_store::load(KEYRING_SERVICE, KEYRING_USER)
 }
 
 fn clear_refresh_token() -> Result<(), String> {
-    let entry = Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    secret_store::clear(KEYRING_SERVICE, KEYRING_USER)
 }
 
 #[cfg(test)]

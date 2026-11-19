@@ -12,6 +12,7 @@ mod media;
 mod playback;
 mod remote;
 mod romanize;
+mod secret_store;
 mod spotify_api;
 mod state;
 mod themes;
