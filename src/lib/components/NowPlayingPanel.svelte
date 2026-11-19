@@ -358,7 +358,9 @@
             <div class="artist-card-followers">{formatCount(artistDetails.followers)} followers</div>
           {/if}
           {#if artistDetails.bio && page}
-            <button type="button" class="artist-card-bio" onclick={() => (aboutPage = page)}>{artistDetails.bio}</button>
+            <button type="button" class="artist-card-bio" onclick={() => (aboutPage = page)}>
+              <span class="artist-card-bio-text">{artistDetails.bio}</span>
+            </button>
           {/if}
           {#if artistDetails.genres.length}
             <div class="artist-card-genres">{artistDetails.genres.slice(0, 3).join(" · ")}</div>
@@ -671,7 +673,8 @@
   color: var(--text-muted);
 }
 .artist-card-bio {
-  display: -webkit-box;
+  display: block;
+  width: 100%;
   margin-top: 0.7em;
   padding: 0;
   border: none;
@@ -682,6 +685,10 @@
   color: var(--text-dim);
   text-align: left;
   cursor: pointer;
+}
+/* Clamped inside the button: WebKit (Linux, macOS) won't clamp a button's own text. */
+.artist-card-bio-text {
+  display: -webkit-box;
   overflow: hidden;
   -webkit-line-clamp: 3;
   line-clamp: 3;
