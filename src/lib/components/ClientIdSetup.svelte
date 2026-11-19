@@ -2,8 +2,11 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../api.js";
 
-  /** @type {{ onSaved: () => void, onCancel?: () => void }} */
-  let { onSaved, onCancel } = $props();
+  /**
+   * `onSkip` offers to go without Spotify for now, playing your own files.
+   * @type {{ onSaved: () => void, onCancel?: () => void, onSkip?: () => void }}
+   */
+  let { onSaved, onCancel, onSkip } = $props();
 
   const DASHBOARD_URL = "https://developer.spotify.com/dashboard";
   const REDIRECT_URI = "http://127.0.0.1:8898/callback";
@@ -127,6 +130,9 @@
     </button>
     {#if onCancel}
       <button type="button" onclick={onCancel} disabled={saving} class="cancel-button">Cancel</button>
+    {/if}
+    {#if onSkip}
+      <button type="button" onclick={onSkip} disabled={saving} class="cancel-button">Skip, just play my own files</button>
     {/if}
     <p class="footnote">Your Client ID stays on this computer.</p>
   </div>

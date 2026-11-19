@@ -130,7 +130,10 @@
     <span class="mono">http://127.0.0.1:8898/callback</span>, then cancel and try again.
   </p>
 {:else if !loggedIn}
-  <p class="status">Log in with Spotify to see your music here.</p>
+  <p class="status">
+    Log in with Spotify to see your music here, or play your own in
+    <button type="button" class="inline-link" onclick={() => navigate({ type: "local" })}>Local Files</button>.
+  </p>
 {:else}
   {#if library.missingScopes.length > 0}
     <div class="banner">
@@ -231,6 +234,15 @@
 .mono {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   color: var(--text);
+}
+.inline-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .banner {
   display: flex;

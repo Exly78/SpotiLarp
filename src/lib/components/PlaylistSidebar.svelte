@@ -484,7 +484,28 @@
       />
     </div>
   {/if}
+  <!-- Your own files play without Spotify, so they're here logged out too. -->
+  {#snippet localFilesItem()}
+    <li>
+      <button
+        type="button"
+        class="playlist-button"
+        class:active={nav.view.type === "local"}
+        onclick={() => navigate({ type: "local" })}
+      >
+        <div class="thumb local-thumb">
+          <Icon name="folder" size={20} />
+        </div>
+        <div class="meta">
+          <div class="name">Local Files</div>
+        </div>
+      </button>
+    </li>
+  {/snippet}
   {#if !loggedIn}
+    <ul class="playlist-list pinned">
+      {@render localFilesItem()}
+    </ul>
     <p class="status">Log in to see your playlists.</p>
   {:else}
     <ul class="playlist-list pinned">
@@ -524,21 +545,7 @@
           </div>
         </button>
       </li>
-      <li>
-        <button
-          type="button"
-          class="playlist-button"
-          class:active={nav.view.type === "local"}
-          onclick={() => navigate({ type: "local" })}
-        >
-          <div class="thumb local-thumb">
-            <Icon name="folder" size={20} />
-          </div>
-          <div class="meta">
-            <div class="name">Local Files</div>
-          </div>
-        </button>
-      </li>
+      {@render localFilesItem()}
     </ul>
     {#if library.loading && library.playlists.length === 0}
       <ul class="playlist-list" transition:fade={{ duration: 150 }}>

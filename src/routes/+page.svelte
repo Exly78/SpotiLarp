@@ -63,6 +63,11 @@
   /** @type {boolean|null} */
   let clientIdConfigured = $state(null);
   let changingClientId = $state(false);
+  const LOCAL_ONLY_KEY = "spotilarp.localOnly";
+  /** Setting up Spotify was skipped, to play your own files (ClientIdSetup's skip). */
+  let localOnly = $state(readLocalOnly());
+  // The app opens once Spotify is set up, or without it for your own files.
+  const appOpen = $derived(clientIdConfigured === true || (clientIdConfigured === false && localOnly && !changingClientId));
 
   let loggedIn = $state(false);
   let restoring = $state(false);
@@ -339,7 +344,7 @@
       notify(`Zoom ${Math.round(zoom.level * 100)}%`);
       return;
     }
-    if (!clientIdConfigured) return;
+    if (!appOpen) return;
     const typing = isTextField(evt.target);
     const plain = !typing && !ctrl && !evt.altKey;
     const key = evt.key.toLowerCase();
@@ -417,6 +422,7 @@
     api.hasClientId().then((configured) => {
       clientIdConfigured = configured;
       if (configured) restoreSessionIfPossible();
+      else if (localOnly) navigate({ type: "local" });
     });
     const stopBackground = listen("app-background", (event) => onBackground(/** @type {boolean} */ (event.payload)));
     // Started minimized to the tray (launch on startup): nothing to draw yet.
@@ -434,6 +440,7 @@
   async function onClientIdSaved() {
     clientIdConfigured = true;
     changingClientId = false;
+    setLocalOnly(false);
     // A different Client ID ends the old app's login (playback's stays):
     // log in again with the new one straight away.
     if (loggedIn && !(await api.loginStatus().catch(() => false))) {
@@ -458,7 +465,31 @@
 
   function cancelClientIdChange() {
     changingClientId = false;
-    clientIdConfigured = true;
+    // Back to your own files if Spotify was never set up.
+    if (!localOnly) clientIdConfigured = true;
+  }
+
+  /** No Spotify for now: straight to your own files. */
+  function skipSetup() {
+    setLocalOnly(true);
+    navigate({ type: "local" });
+  }
+
+  function readLocalOnly() {
+    try {
+      return localStorage.getItem(LOCAL_ONLY_KEY) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  /** @param {boolean} on */
+  function setLocalOnly(on) {
+    localOnly = on;
+    try {
+      if (on) localStorage.setItem(LOCAL_ONLY_KEY, "true");
+      else localStorage.removeItem(LOCAL_ONLY_KEY);
+    } catch {}
   }
 
   const regionNames = new Intl.DisplayNames(undefined, { type: "region" });
@@ -626,13 +657,17 @@
 
 {#if miniMode}
   <MiniPlayer onExpand={() => setMiniMode(false)} />
-{:else if clientIdConfigured === false}
+{:else if clientIdConfigured === false && !appOpen}
   <div class="setup-titlebar" data-tauri-drag-region="deep">
     <span class="setup-title">SpotiLarp</span>
     <WindowControls />
   </div>
-  <ClientIdSetup onSaved={onClientIdSaved} onCancel={changingClientId ? cancelClientIdChange : undefined} />
-{:else if clientIdConfigured === true && !uiAsleep}
+  <ClientIdSetup
+    onSaved={onClientIdSaved}
+    onCancel={changingClientId ? cancelClientIdChange : undefined}
+    onSkip={changingClientId ? undefined : skipSetup}
+  />
+{:else if appOpen && !uiAsleep}
 
 <div class="app" class:lyrics-fullscreen={lyricsFullscreen}>
   <header class="topbar" data-tauri-drag-region="deep">
@@ -728,6 +763,8 @@
       {#if loggingIn}
         <span class="status-text wide-only">{status}</span>
         <button type="button" onclick={cancelLogin} class="pill-button">Cancel</button>
+      {:else if !loggedIn && clientIdConfigured === false}
+        <button type="button" onclick={changeClientId} class="pill-button">Set up Spotify</button>
       {:else if !loggedIn}
         {#if restoreFailed}
           <button onclick={restoreSessionIfPossible} disabled={restoring} class="pill-button primary">Retry</button>
@@ -739,7 +776,7 @@
           <button type="button" onclick={changeClientId} class="text-button wide-only">Change Client ID</button>
         {/if}
       {/if}
-      {#if !playbackConnected}
+      {#if !playbackConnected && clientIdConfigured}
         <span class="status-text wide-only">{playbackStatus}</span>
         {#if connecting && connectingInteractive}
           <button type="button" onclick={cancelLogin} class="pill-button">Cancel</button>
@@ -809,7 +846,9 @@
             {loggingOut ? "Logging out..." : "Log out"}
           </button>
         {:else if !loggingIn && !restoring}
-          <button type="button" onclick={changeClientId} class="text-button menu-link">Change Client ID</button>
+          <button type="button" onclick={changeClientId} class="text-button menu-link">
+            {clientIdConfigured ? "Change Client ID" : "Set up Spotify"}
+          </button>
         {/if}
       </AccountMenu>
       <button
