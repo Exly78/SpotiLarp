@@ -202,6 +202,12 @@ export const getArtistPage = (artistId) => invoke("get_artist_page", { artistId 
  */
 export const getNowPlayingInfo = (trackId, artistId) => invoke("get_now_playing_info", { trackId, artistId });
 /**
+ * Whether a video Canvas can play: on Linux, without GStreamer's audio
+ * output the page's process crashes as soon as a video starts.
+ * @returns {Promise<boolean>}
+ */
+export const canPlayVideo = () => invoke("can_play_video");
+/**
  * @param {string} artistId
  * @param {import("./types.js").ReleaseGroup} group
  * @returns {Promise<import("./types.js").Album[]>}

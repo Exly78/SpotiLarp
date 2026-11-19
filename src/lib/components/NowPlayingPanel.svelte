@@ -1,4 +1,5 @@
 <script module>
+  import * as api from "../api.js";
   import { BoundedCache } from "../boundedCache.js";
 
   /**
@@ -25,6 +26,11 @@
 
   // Canvas is decoration; people who've asked for less motion get the cover.
   const reducedMotion = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // A video Canvas can crash the page on Linux (video.rs), so it waits for the
+  // app to say it's safe; until then the cover shows.
+  const video = $state({ supported: false });
+  api.canPlayVideo().then((supported) => (video.supported = supported)).catch(() => {});
 </script>
 
 <script>
@@ -36,7 +42,6 @@
   import OnTour from "./OnTour.svelte";
   import TrackCredits from "./TrackCredits.svelte";
   import UpNext from "./UpNext.svelte";
-  import * as api from "../api.js";
   import { likedIds, likeBusy, toggleLike } from "../likes.svelte.js";
   import { openAlbum, openArtist, openShow } from "../nav.svelte.js";
   import { player } from "../player.svelte.js";
@@ -77,7 +82,8 @@
 
   const canvas = $derived.by(() => {
     const found = info?.canvas;
-    return !reducedMotion && found && found.url !== brokenCanvas ? found : null;
+    const playable = found && (!found.is_video || video.supported);
+    return !reducedMotion && playable && found.url !== brokenCanvas ? found : null;
   });
 
   // A new artist: their card from what's known so far, and whether you follow them.

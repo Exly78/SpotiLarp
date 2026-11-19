@@ -51,6 +51,10 @@ Prerequisites:
 - [Node.js](https://nodejs.org/) (LTS)
 - [Rust](https://www.rust-lang.org/tools/install)
 - The [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS
+- On Linux, GStreamer's plugins, for the Now Playing panel's Canvas videos:
+  `gst-plugins-good gst-libav` (Arch), `gstreamer1.0-plugins-good gstreamer1.0-libav`
+  (Debian/Ubuntu) or `gstreamer1-plugins-good gstreamer1-plugin-openh264` (Fedora). Without
+  them the panel shows the cover instead.
 
 ```bash
 npm install

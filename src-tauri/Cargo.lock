@@ -6983,6 +6983,7 @@ dependencies = [
  "discord-rich-presence",
  "iroh",
  "keyring",
+ "libloading",
  "librespot-core",
  "librespot-metadata",
  "librespot-playback",

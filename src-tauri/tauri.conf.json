@@ -45,7 +45,20 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["gstreamer1.0-plugins-good"],
+        "recommends": ["gstreamer1.0-libav"]
+      },
+      "rpm": {
+        "depends": ["gstreamer1-plugins-good"],
+        "recommends": ["gstreamer1-plugin-openh264"]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
   },
   "plugins": {
     "deep-link": {

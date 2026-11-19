@@ -18,6 +18,7 @@ mod themes;
 #[cfg(target_os = "windows")]
 mod thumbbar;
 mod tray;
+mod video;
 mod window_state;
 
 use spotify_api::client::SpotifyClient;
@@ -247,6 +248,7 @@ pub fn run() {
             commands::set_volume,
             commands::get_lyrics,
             commands::romanize_lyrics,
+            commands::can_play_video,
             commands::has_discord_client_id,
             commands::enable_discord_presence,
             commands::clear_discord_client_id,

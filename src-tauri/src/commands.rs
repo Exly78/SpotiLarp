@@ -34,6 +34,7 @@ use crate::spotify_api::search::{self, search_tracks};
 use crate::spotify_api::shows;
 use crate::state::{AppState, MiniRestore, PlaybackHandle};
 use crate::themes;
+use crate::video;
 
 #[tauri::command]
 pub async fn has_client_id(state: State<'_, AppState>) -> Result<bool, String> {
@@ -1084,6 +1085,13 @@ pub async fn romanize_lyrics(lines: Vec<String>) -> Result<Vec<String>, String> 
     tokio::task::spawn_blocking(move || romanize::lines(&lines))
         .await
         .map_err(|e| format!("Couldn't romanize the lyrics: {e}"))
+}
+
+/// Whether the page can play a video Canvas without its process crashing (see video.rs).
+#[tauri::command]
+pub async fn can_play_video() -> bool {
+    // Finding out can mean GStreamer scanning its plugins, so it's kept off the async threads.
+    tokio::task::spawn_blocking(video::supported).await.unwrap_or(false)
 }
 
 #[tauri::command]
