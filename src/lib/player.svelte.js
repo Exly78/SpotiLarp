@@ -6,6 +6,7 @@ import { isEpisodeUri, recordPosition, episodeTrack } from "./podcasts.svelte.js
 import { setFadeHandler } from "./sleep.svelte.js";
 import { dominantColor } from "./colors.js";
 import { LOCAL_URI_PREFIX } from "./constants.js";
+import { connect, onOutputChange, applyStatus } from "./connect.svelte.js";
 
 const VOLUME_KEY = "spotilarp.volume";
 const SESSION_KEY = "spotilarp.nowPlaying";
@@ -13,6 +14,8 @@ const DEFAULT_VOLUME = 50;
 const TICK_MS = 200;
 const SAVE_POSITION_MS = 5000;
 const RESTART_THRESHOLD_MS = 3000;
+/** Another device's volume goes to Spotify once the slider settles, not on every step. */
+const REMOTE_VOLUME_DELAY_MS = 250;
 
 /**
  * @typedef {Object} CurrentTrack
@@ -44,6 +47,10 @@ let fadeLevel = 1;
 let anchorMs = player.positionMs;
 let anchorAt = 0;
 let volumeBeforeMute = DEFAULT_VOLUME;
+/** @type {ReturnType<typeof setTimeout>|undefined} */
+let remoteVolumeTimer;
+/** Set while this app moves the music itself, so it isn't also treated as being moved. */
+let switching = false;
 
 function readSavedVolume() {
   try {
@@ -73,8 +80,20 @@ updateColor(player.track?.coverUrl ?? null);
 
 setFadeHandler((level) => {
   fadeLevel = level;
-  api.setVolume(Math.round((player.volume / 100) * 65535 * level)).catch(() => {});
+  sendVolume(Math.round((player.volume / 100) * 65535 * level)).catch(() => {});
 });
+
+/**
+ * @param {number} level 0 to 65535
+ * @returns {Promise<unknown>}
+ */
+function sendVolume(level) {
+  if (connect.output !== "remote") return api.setVolume(level);
+  clearTimeout(remoteVolumeTimer);
+  return new Promise((resolve, reject) => {
+    remoteVolumeTimer = setTimeout(() => api.setVolume(level).then(resolve, reject), REMOTE_VOLUME_DELAY_MS);
+  });
+}
 
 /** Where playback is right now (the on-screen position only moves a few times a second). */
 export function currentPositionMs() {
@@ -83,6 +102,8 @@ export function currentPositionMs() {
 }
 
 function saveSession() {
+  // Another app's song isn't SpotiLarp's to come back to.
+  if (connect.output === "receiving") return;
   try {
     if (player.track) {
       const session = { track: $state.snapshot(player.track), positionMs: Math.round(currentPositionMs()) };
@@ -256,6 +277,8 @@ export function restartAfterPlayerRebuild() {
 // Spotify dropped the playback session and the backend connected again: a
 // Spotify song carries on from where it was (a local file never stopped).
 listen("playback-reconnected", () => {
+  // Another device carries on regardless.
+  if (connect.output === "remote") return;
   if (!player.track || player.track.uri?.startsWith(LOCAL_URI_PREFIX)) return;
   const wasPlaying = player.isPlaying;
   restartAfterPlayerRebuild();
@@ -276,6 +299,7 @@ export function resetPlayer() {
 export function previousOrRestart() {
   const guest = jamGuest();
   if (guest) return guest.control("previous");
+  if (connect.output === "receiving") return api.connectControl("previous").catch((e) => notify(`${e}`));
   if (player.positionMs > RESTART_THRESHOLD_MS || !hasPrevious()) seekTo(0);
   else previous();
 }
@@ -302,10 +326,13 @@ export function seekBy(ms) {
 /** @param {number} pct */
 export function setVolume(pct) {
   player.volume = pct;
-  try {
-    localStorage.setItem(VOLUME_KEY, String(pct));
-  } catch {}
-  api.setVolume(Math.round((pct / 100) * 65535 * fadeLevel)).catch((e) => notify(`${e}`));
+  // Another device's volume is its own; this computer's is kept for coming back to.
+  if (connect.output === "here") {
+    try {
+      localStorage.setItem(VOLUME_KEY, String(pct));
+    } catch {}
+  }
+  sendVolume(Math.round((pct / 100) * 65535 * fadeLevel)).catch((e) => notify(`${e}`));
 }
 
 export function toggleMute() {
@@ -315,4 +342,50 @@ export function toggleMute() {
   } else {
     setVolume(volumeBeforeMute || DEFAULT_VOLUME);
   }
+}
+
+onOutputChange((from, to) => {
+  if (from === "receiving") {
+    // The other app's song goes, and SpotiLarp's own comes back as it was left.
+    const session = readSavedSession();
+    player.track = session?.track ?? null;
+    setPosition(session?.positionMs ?? 0);
+    updateColor(player.track?.coverUrl ?? null);
+  }
+  if (to === "here") {
+    if (!switching) {
+      // Nothing is loaded here: playing again starts SpotiLarp's song here.
+      player.isPlaying = false;
+      player.loaded = false;
+    }
+    setVolume(readSavedVolume());
+  }
+});
+
+/**
+ * Plays on another Spotify Connect device, or back on this computer (`null`),
+ * carrying on from the same place in the song.
+ * @param {import("./api.js").ConnectDevice|null} device
+ */
+export async function playOn(device) {
+  const wasPlaying = player.isPlaying;
+  const positionMs = currentPositionMs();
+  const from = connect.output;
+  switching = true;
+  try {
+    applyStatus(await api.connectSelect(device?.id ?? null, device?.name));
+  } catch (e) {
+    notify(`${e}`);
+    return;
+  } finally {
+    switching = false;
+  }
+  // Another app's music was playing here: Spotify moves it there itself.
+  if (from === "receiving") {
+    if (device) notify(`Playing on ${device.name}`);
+    return;
+  }
+  player.loaded = false;
+  player.isPlaying = false;
+  if (wasPlaying || jamGuest()) await playCurrent(positionMs);
 }

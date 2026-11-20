@@ -22,7 +22,7 @@
   let saveBusy = $state(false);
 
   const saved = $derived(isAlbumSaved(id));
-  const view = $derived.by(() => /** @type {import("../../nav.svelte.js").View} */ ({ type: "album", id, name: album?.name ?? name }));
+  const view = $derived.by(() => /** @type {import("../../nav.svelte.js").View} */ ({ type: "album", id, name: album?.name ?? name, image: coverAtLeast(album?.images, 300) }));
 
   const totalMs = $derived.by(() => (album ? album.tracks.reduce((sum, t) => sum + t.duration_ms, 0) : 0));
   const label = $derived.by(() =>

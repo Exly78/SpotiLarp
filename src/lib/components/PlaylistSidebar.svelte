@@ -33,8 +33,11 @@
    * @typedef {import("../types.js").Show} Show
    */
 
-  /** @type {{ loggedIn: boolean }} */
-  let { loggedIn } = $props();
+  /**
+   * `collapsed` shows only the covers, with the names as tooltips.
+   * @type {{ loggedIn: boolean, collapsed?: boolean, onToggleCollapsed?: () => void }}
+   */
+  let { loggedIn, collapsed = false, onToggleCollapsed } = $props();
 
   const LIKED_SONGS = {
     id: LIKED_SONGS_ID,
@@ -55,7 +58,7 @@
   const FILTERS = { all: "Everything", playlists: "Playlists", mine: "Playlists by you", albums: "Albums", podcasts: "Podcasts" };
   const SORT_KEY = "spotilarp.librarySort";
   /** @type {Record<string, string>} */
-  const SORTS = { default: "Spotify order", recent: "Recently played", name: "Alphabetical" };
+  const SORTS = { default: "Spotify order", recent: "Recents", name: "Alphabetical" };
 
   let filter = $state(readFilter());
   let sort = $state(readSetting(SORT_KEY, "default"));
@@ -391,6 +394,8 @@
   /** @param {Playlist} playlist */
   async function startRename(playlist) {
     menu = null;
+    // The name box needs the full width.
+    if (collapsed) onToggleCollapsed?.();
     renamingId = playlist.id;
     renameValue = playlist.name;
     await tick();
@@ -444,9 +449,20 @@
   onwheel={() => (menu = null)}
 />
 
-<nav class="sidebar">
+<nav class="sidebar" class:collapsed>
   <div class="header-row">
-    <h2>Your Library</h2>
+    <div class="header-title">
+      <button
+        type="button"
+        class="refresh collapse-toggle"
+        onclick={onToggleCollapsed}
+        aria-label={collapsed ? "Expand Your Library" : "Collapse Your Library"}
+        title={collapsed ? "Expand Your Library" : "Collapse Your Library"}
+      >
+        <Icon name="panel-left" size={16} />
+      </button>
+      <h2>Your Library</h2>
+    </div>
     <div class="header-buttons">
       <button
         type="button"
@@ -492,6 +508,7 @@
         class="playlist-button"
         class:active={nav.view.type === "local"}
         onclick={() => navigate({ type: "local" })}
+        title={collapsed ? "Local Files" : undefined}
       >
         <div class="thumb local-thumb">
           <Icon name="folder" size={20} />
@@ -517,7 +534,7 @@
           class:drop-target={dropTargetId === LIKED_SONGS_ID}
           onclick={() => open(LIKED_SONGS)}
           ondblclick={() => playPlaylist(LIKED_SONGS)}
-          title="Double-click to play"
+          title={collapsed ? "Liked Songs" : "Double-click to play"}
           ondragover={(e) => onDragOver(e, LIKED_SONGS)}
           ondragleave={() => onDragLeave(LIKED_SONGS)}
           ondrop={(e) => onDrop(e, LIKED_SONGS)}
@@ -536,6 +553,7 @@
           class="playlist-button"
           class:active={nav.view.type === "stats"}
           onclick={() => navigate({ type: "stats" })}
+          title={collapsed ? "Your stats" : undefined}
         >
           <div class="thumb stats-thumb">
             <Icon name="chart" size={20} />
@@ -562,26 +580,30 @@
     {:else if library.error}
       <p class="status error" transition:fade={{ duration: 150 }}>{library.error}</p>
     {:else}
-      <div class="library-tools">
-        <select class="library-select" value={filter} onchange={(e) => chooseFilter(e.currentTarget.value)} aria-label="Show">
-          {#each filterOptions as [value, label]}
-            <option {value}>{label}</option>
-          {/each}
-        </select>
-        <select class="library-select" value={sort} onchange={(e) => chooseSort(e.currentTarget.value)} aria-label="Sort by">
-          {#each Object.entries(SORTS) as [value, label]}
-            <option {value}>{label}</option>
-          {/each}
-        </select>
+      <div class="library-filters">
+        <div class="library-filters-inner">
+          <div class="library-tools">
+            <select class="library-select" value={filter} onchange={(e) => chooseFilter(e.currentTarget.value)} aria-label="Show">
+              {#each filterOptions as [value, label]}
+                <option {value}>{label}</option>
+              {/each}
+            </select>
+            <select class="library-select" value={sort} onchange={(e) => chooseSort(e.currentTarget.value)} aria-label="Sort by">
+              {#each Object.entries(SORTS) as [value, label]}
+                <option {value}>{label}</option>
+              {/each}
+            </select>
+          </div>
+          <input
+            type="search"
+            class="library-search"
+            placeholder="Search in Your Library"
+            bind:value={search}
+            spellcheck="false"
+            aria-label="Search in Your Library"
+          />
+        </div>
       </div>
-      <input
-        type="search"
-        class="library-search"
-        placeholder="Search in Your Library"
-        bind:value={search}
-        spellcheck="false"
-        aria-label="Search in Your Library"
-      />
       {#if showPlaylists && library.playlists.length === 0}
         <p class="status" transition:fade={{ duration: 150 }}>No playlists yet.</p>
       {:else if search.trim() && shownPlaylists.length === 0 && shownAlbums.length === 0 && shownShows.length === 0}
@@ -591,7 +613,7 @@
         {#each playlistRows as row, i (row.key)}
           <li
             in:fly={{ y: 8, duration: 220, delay: Math.min(i * 25, 300), easing: cubicOut }}
-            style={row.depth > 0 ? `padding-left: ${row.depth * 0.9}em` : ""}
+            style={row.depth > 0 && !collapsed ? `padding-left: ${row.depth * 0.9}em` : ""}
           >
             {#if row.kind === "folder"}
               <button
@@ -599,7 +621,7 @@
                 class="playlist-button"
                 onclick={() => toggleFolder(row.id)}
                 aria-expanded={row.open}
-                title={row.open ? "Close folder" : "Open folder"}
+                title={collapsed ? row.name : row.open ? "Close folder" : "Open folder"}
               >
                 <div class="thumb folder-thumb">
                   <Icon name="folder" size={20} />
@@ -632,6 +654,7 @@
                 onclick={() => open(playlist)}
                 ondblclick={() => playPlaylist(playlist)}
                 oncontextmenu={(e) => openMenu(e, playlist)}
+                title={collapsed ? playlist.name : undefined}
                 ondragover={(e) => onDragOver(e, playlist)}
                 ondragleave={() => onDragLeave(playlist)}
                 ondrop={(e) => onDrop(e, playlist)}
@@ -646,9 +669,9 @@
                     {#if isPinned(`playlist:${playlist.id}`)}<span class="pin" title="Pinned">●</span>{/if}{playlist.name}
                   </div>
                   <div class="count">
-                    {playlist.track_count.total} {playlist.track_count.total === 1 ? "track" : "tracks"}
+                    Playlist · {playlist.track_count.total} {playlist.track_count.total === 1 ? "track" : "tracks"}
                     {#if playlist.owner?.display_name && playlist.owner.id !== library.userId}
-                      · {playlist.owner.display_name}
+                      · by {playlist.owner.display_name}
                     {/if}
                   </div>
                 </div>
@@ -665,6 +688,7 @@
               onclick={() => openAlbum(album)}
               ondblclick={() => playAlbum(album)}
               oncontextmenu={(e) => openAlbumMenu(e, album)}
+              title={collapsed ? album.name : undefined}
             >
               {#if smallestCover(album.images)}
                 <img src={smallestCover(album.images)} alt="" class="thumb" />
@@ -688,6 +712,7 @@
               class:active={selectedShowId === show.id}
               onclick={() => openShow(show)}
               oncontextmenu={(e) => openShowMenu(e, show)}
+              title={collapsed ? show.name : undefined}
             >
               {#if smallestCover(show.images)}
                 <img src={smallestCover(show.images)} alt="" class="thumb" />
@@ -776,18 +801,84 @@
 
 <style>
 .sidebar {
+  /* Shutting, the text fades before the library narrows (the page waits for
+     it); opening, it fades back once there's room, so it's never seen squeezing. */
+  --text-out: opacity 70ms ease, visibility 0s 70ms;
+  --text-in: opacity 160ms ease 150ms, visibility 0s 150ms;
   display: flex;
   flex-direction: column;
   gap: 0.75em;
   width: 100%;
   height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 .header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 0.4em;
+  padding: 0 0.4em 0 0.5em;
+}
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  min-width: 0;
+}
+/* Centered over the covers (40px, with the rows' 0.5em in front). */
+.collapse-toggle {
+  flex-shrink: 0;
+  margin-left: 7px;
+}
+/* Collapsed, it's a strip of covers with the names as tooltips. The covers
+   don't jump: the text fades, and the filters fold away as the library
+   narrows (same timing as the page's slide), so the rows glide up into their place. */
+.sidebar.collapsed {
+  scrollbar-width: none;
+}
+.library-filters {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.2, 0, 0, 1), margin-top 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+.library-filters-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  min-height: 0;
+  overflow: hidden;
+}
+.collapsed .library-filters {
+  grid-template-rows: 0fr;
+  /* And the gap above them. */
+  margin-top: -0.75em;
+  transition-delay: 70ms;
+}
+h2,
+.header-buttons,
+.new-playlist,
+.status,
+.library-tools,
+.library-search,
+.meta,
+.skeleton-lines {
+  transition: var(--text-in);
+}
+.collapsed h2,
+.collapsed .header-buttons,
+.collapsed .new-playlist,
+.collapsed .status,
+.collapsed .library-tools,
+.collapsed .library-search,
+.collapsed .meta,
+.collapsed .skeleton-lines,
+.collapsed :global(.folder-chevron) {
+  opacity: 0;
+  visibility: hidden;
+  transition: var(--text-out);
+}
+.collapsed :global(.folder-chevron) {
+  transition: transform var(--transition), var(--text-out);
 }
 .library-tools {
   display: flex;
@@ -807,7 +898,9 @@
   outline: none;
 }
 .library-select {
-  flex: 1 1 0;
+  /* Sized by what's chosen (not the longest option), so the longer one isn't cut off to match the shorter. */
+  flex: 1 1 auto;
+  field-sizing: content;
   text-overflow: ellipsis;
   cursor: pointer;
 }
@@ -832,7 +925,7 @@
   flex-shrink: 0;
   margin-left: auto;
   color: var(--text-muted);
-  transition: transform var(--transition);
+  transition: transform var(--transition), var(--text-in);
 }
 :global(.folder-chevron.open) {
   transform: rotate(90deg);
@@ -850,6 +943,9 @@ h2 {
   font-weight: var(--fw-bold);
   color: var(--text-muted);
   margin: 0;
+  /* One line, so the header keeps its height as the library narrows. */
+  white-space: nowrap;
+  overflow: hidden;
 }
 .refresh {
   display: flex;

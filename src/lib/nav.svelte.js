@@ -1,12 +1,13 @@
 /**
+ * `image` is the page's picture when it's known, for Home's "Jump back in".
  * @typedef {{ type: "home" }
  *   | { type: "playlist", playlist: import("./types.js").Playlist }
- *   | { type: "artist", id: string, name: string }
+ *   | { type: "artist", id: string, name: string, image?: string|null }
  *   | { type: "discography", id: string, name: string, group: import("./types.js").ReleaseGroup }
- *   | { type: "album", id: string, name?: string }
+ *   | { type: "album", id: string, name?: string, image?: string|null }
  *   | { type: "search", query: string }
  *   | { type: "radio", seed: string, name: string, image?: string|null }
- *   | { type: "show", id: string, name?: string }
+ *   | { type: "show", id: string, name?: string, image?: string|null }
  *   | { type: "profile", id: string, name?: string }
  *   | { type: "stats" }
  *   | { type: "local" }
@@ -36,6 +37,26 @@ export function viewKey(view) {
     default:
       return view.type;
   }
+}
+
+/** @type {Partial<Record<View["type"], string>>} */
+const CONTEXT_KINDS = {
+  playlist: "playlist",
+  album: "album",
+  artist: "artist",
+  discography: "artist",
+  search: "search",
+  radio: "radio",
+  show: "podcast",
+};
+
+/**
+ * What kind of page a list was played from, for "Playing from playlist", or
+ * "" when its name says enough ("Local Files").
+ * @param {View|null} view
+ */
+export function contextKind(view) {
+  return (view && CONTEXT_KINDS[view.type]) ?? "";
 }
 
 /** @param {View} view */

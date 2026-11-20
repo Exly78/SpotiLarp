@@ -50,8 +50,8 @@
   let moreWrap = $state();
 
   const artistName = $derived(page?.name || name);
-  const view = $derived(/** @type {import("../../nav.svelte.js").View} */ ({ type: "artist", id, name: artistName }));
   const avatar = $derived(coverAtLeast(page?.images, 300));
+  const view = $derived(/** @type {import("../../nav.svelte.js").View} */ ({ type: "artist", id, name: artistName, image: avatar }));
   const banner = $derived(coverAtLeast(page?.header_images, 1600));
   const metadataTint = $derived(page?.color ? tintFromHex(page.color) : "");
   const tint = $derived(metadataTint || extractedTint);

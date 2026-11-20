@@ -7,6 +7,7 @@ import { queue, slim, next, addManyToQueue, upcomingContext, setJamGuest } from 
 import { episodeTrack } from "./podcasts.svelte.js";
 import { createPlaylist, adjustTrackCount } from "./library.svelte.js";
 import { navigate } from "./nav.svelte.js";
+import { connect } from "./connect.svelte.js";
 
 /**
  * Jams: listening together. The host's app plays as usual and tells the
@@ -375,7 +376,8 @@ $effect.root(() => {
 /** @param {import("./types.js").PlaybackEvent} e */
 function onHostPlayback(e) {
   if (e.type === "TrackChanged") {
-    sharedTrack = queue.current ? shareable(queue.current) : null;
+    // Another Spotify app playing on SpotiLarp isn't the host's queue to share.
+    sharedTrack = queue.current && connect.output !== "receiving" ? shareable(queue.current) : null;
     if (sharedTrack) addPlayed(sharedTrack);
     broadcastSoon();
   } else if (["Playing", "Paused", "Seeked", "Stopped"].includes(e.type)) {

@@ -47,6 +47,11 @@
     <rect x="3" y="4" width="18" height="16" rx="2" />
     <rect x="15" y="4" width="6" height="16" rx="2" fill="currentColor" stroke="none" />
   </svg>
+{:else if name === "panel-left"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <rect x="3" y="4" width="6" height="16" rx="2" fill="currentColor" stroke="none" />
+  </svg>
 {:else if name === "close"}
   <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
     <line x1="5" y1="5" x2="19" y2="19" />
@@ -174,12 +179,10 @@
     <polygon points="16,15 16,21 21,18" fill="currentColor" stroke="none" />
   </svg>
 {:else if name === "discord"}
-  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M6.5 6.5c3.5-1.6 7.5-1.6 11 0" />
-    <path d="M5 8.2C2.8 12 2.5 15.7 3.4 18.5c1.6 1.4 3.4 2.1 5.1 2.5l1-1.9" />
-    <path d="M19 8.2c2.2 3.8 2.5 7.5 1.6 10.3-1.6 1.4-3.4 2.1-5.1 2.5l-1-1.9" />
-    <path d="M8.4 15c-3 0-3-4.6 0-4.6s3 4.6 0 4.6z" fill="currentColor" stroke="none" />
-    <path d="M15.6 15c-3 0-3-4.6 0-4.6s3 4.6 0 4.6z" fill="currentColor" stroke="none" />
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+    <path
+      d="M20.317 4.3698a19.7913 19.7913 0 0 0-4.8851-1.5152.0741.0741 0 0 0-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 0 0-.0785-.037 19.7363 19.7363 0 0 0-4.8852 1.515.0699.0699 0 0 0-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 0 0 .0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 0 0 .0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 0 0-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 0 1-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 0 1 .0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 0 1 .0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 0 1-.0066.1276 12.2986 12.2986 0 0 1-1.873.8914.0766.0766 0 0 0-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 0 0 .0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 0 0 .0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 0 0-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189z"
+    />
   </svg>
 {:else if name === "repeat-one"}
   <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -253,5 +256,33 @@
       <polyline points="4,3.5 4.6,8.5 9.5,7.6" />
     </g>
     <text x="12.4" y="15.6" font-size="8" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">15</text>
+  </svg>
+{:else if name === "devices"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="9" height="15" rx="1.5" />
+    <rect x="15" y="9" width="6" height="12" rx="1.5" />
+    <circle cx="7.5" cy="12" r="2" />
+    <line x1="18" y1="17.5" x2="18" y2="17.5" />
+  </svg>
+{:else if name === "computer"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="4" width="16" height="11" rx="1.5" />
+    <line x1="2" y1="19" x2="22" y2="19" />
+  </svg>
+{:else if name === "smartphone"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2" />
+    <line x1="12" y1="18" x2="12" y2="18" />
+  </svg>
+{:else if name === "speaker"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="5" y="2.5" width="14" height="19" rx="2" />
+    <circle cx="12" cy="14" r="3.5" />
+    <line x1="12" y1="6.5" x2="12" y2="6.5" />
+  </svg>
+{:else if name === "tv"}
+  <svg {...rest} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="4" width="19" height="13" rx="1.5" />
+    <line x1="8" y1="21" x2="16" y2="21" />
   </svg>
 {/if}

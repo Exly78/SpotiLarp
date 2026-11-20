@@ -43,14 +43,25 @@
   import TrackCredits from "./TrackCredits.svelte";
   import UpNext from "./UpNext.svelte";
   import { likedIds, likeBusy, toggleLike } from "../likes.svelte.js";
-  import { openAlbum, openArtist, openShow } from "../nav.svelte.js";
+  import { contextKind, navigate, openAlbum, openArtist, openShow } from "../nav.svelte.js";
   import { player } from "../player.svelte.js";
   import { isEpisodeUri } from "../podcasts.svelte.js";
   import { queue } from "../queue.svelte.js";
   import { coverAtLeast, formatCount, htmlToText } from "../utils.js";
 
-  /** @type {{ contextName?: string|null, visible?: boolean, onClose: () => void, onShowQueue?: () => void }} */
-  let { contextName = null, visible = true, onClose, onShowQueue } = $props();
+  /**
+   * `contextView` is the page the playing list came from, which the header links back to.
+   * @type {{
+   *   contextName?: string|null,
+   *   contextView?: import("../nav.svelte.js").View|null,
+   *   visible?: boolean,
+   *   onClose: () => void,
+   *   onShowQueue?: () => void,
+   * }}
+   */
+  let { contextName = null, contextView = null, visible = true, onClose, onShowQueue } = $props();
+
+  const contextKindLabel = $derived(contextKind(contextView));
 
   const trackId = $derived(player.track?.trackId ?? null);
   const artistId = $derived(player.track?.primaryArtistId ?? null);
@@ -226,7 +237,21 @@
 
 {#snippet header()}
   <div class="panel-header">
-    <span class="context-name">{contextName ?? "Now Playing"}</span>
+    {#if contextName}
+      <div class="context">
+        <span class="context-kind">Playing from{contextKindLabel ? ` ${contextKindLabel}` : ""}</span>
+        {#if contextView}
+          {@const view = contextView}
+          <button type="button" class="context-name context-link" onclick={() => navigate(view)} title={`Go to ${contextName}`}>
+            {contextName}
+          </button>
+        {:else}
+          <span class="context-name">{contextName}</span>
+        {/if}
+      </div>
+    {:else}
+      <span class="context-name">Now Playing</span>
+    {/if}
     <button type="button" class="close-button" onclick={onClose} aria-label="Close panel">
       <Icon name="close" size={16} />
     </button>
@@ -415,6 +440,19 @@
   justify-content: space-between;
   gap: 0.5em;
 }
+.context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+  min-width: 0;
+}
+.context-kind {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
 .context-name {
   font-size: var(--fs-sm);
   font-weight: var(--fw-bold);
@@ -422,6 +460,19 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.context-link {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.context-link:hover {
+  text-decoration: underline;
 }
 .close-button {
   display: flex;
@@ -510,7 +561,8 @@
 .canvas-hero .track-name {
   color: #fff;
 }
-.canvas-hero .artists {
+.canvas-hero .artists,
+.canvas-hero .context-kind {
   color: rgba(255, 255, 255, 0.8);
 }
 .canvas-hero .artists .link:hover {

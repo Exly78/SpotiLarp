@@ -21,6 +21,32 @@ export function formatDuration(ms) {
 }
 
 /**
+ * Time listened, short: "42m", "6h 40m", "1,204h".
+ * @param {number} ms
+ */
+export function compactDuration(ms) {
+  const minutes = Math.round(ms / 60_000);
+  const hours = Math.floor(minutes / 60);
+  if (hours === 0) return `${minutes}m`;
+  if (hours >= 100) return `${formatCount(hours)}h`;
+  return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+}
+
+const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+/**
+ * How long ago something was, like "5 minutes ago" or "yesterday".
+ * @param {number} at ms since 1970
+ */
+export function timeAgo(at) {
+  const minutes = Math.round((at - Date.now()) / 60_000);
+  if (minutes > -60) return relativeFormatter.format(Math.min(minutes, 0), "minute");
+  const hours = Math.round(minutes / 60);
+  if (hours > -24) return relativeFormatter.format(hours, "hour");
+  return relativeFormatter.format(Math.round(hours / 24), "day");
+}
+
+/**
  * @param {import("./types.js").Image[] | null | undefined} images
  * @param {number} minWidth
  */

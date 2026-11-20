@@ -4,6 +4,7 @@
   import {
     queue,
     contextLabel,
+    autoplaying,
     upcomingContext,
     playFromQueue,
     skipToContext,
@@ -15,7 +16,7 @@
   import { drag, startTrackDrag, endDrag, insertionIndex } from "../drag.svelte.js";
   import { openTrackMenu } from "../contextMenu.svelte.js";
   import { smallestCover } from "../utils.js";
-  import { navigate } from "../nav.svelte.js";
+  import { contextKind, navigate } from "../nav.svelte.js";
   import { jam } from "../jam.svelte.js";
   import RecentList from "./RecentList.svelte";
 
@@ -147,7 +148,7 @@
       {#if queue.contextView && queue.contextName}
         {@const view = queue.contextView}
         <div class="playing-from">
-          Playing from <button type="button" class="text-button context-link" onclick={() => navigate(view)}>{queue.contextName}</button>
+          Playing from {contextKind(view)} <button type="button" class="text-button context-link" onclick={() => navigate(view)}>{queue.contextName}</button>
         </div>
       {/if}
       <div class="row static" role="presentation" oncontextmenu={(e) => queue.current && openTrackMenu(e, queue.current)}>
@@ -196,7 +197,7 @@
 
     {#if context.upcoming.length > 0}
       <section>
-        <h3>Next from: {contextLabel() || "this list"}</h3>
+        <h3>Next from: {autoplaying() ? "" : contextKind(queue.contextView)} {contextLabel() || "this list"}</h3>
         {#each context.upcoming as { track, position } (position)}
           <button
             type="button"

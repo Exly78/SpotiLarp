@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import * as api from "$lib/api.js";
@@ -7,6 +7,7 @@
   import {
     queue,
     contextLabel,
+    autoplaying,
     playFromList,
     next,
     toggleShuffle,
@@ -34,6 +35,8 @@
   import { runLaunchCommands } from "$lib/remote.js";
   import { zoom, zoomIn, zoomOut, resetZoom, suspendZoom } from "$lib/zoom.svelte.js";
   import "$lib/history.svelte.js";
+  import "$lib/lastfm.svelte.js";
+  import { syncSpotifyPlays } from "$lib/tracker.svelte.js";
   import { LIKED_SONGS_ID } from "$lib/constants.js";
   import PlaylistSidebar from "$lib/components/PlaylistSidebar.svelte";
   import MainContent from "$lib/components/MainContent.svelte";
@@ -41,6 +44,8 @@
   import { clearStatsCache } from "$lib/components/views/StatsView.svelte";
   import { clearRadioCache } from "$lib/components/views/RadioView.svelte";
   import ShortcutsDialog from "$lib/components/ShortcutsDialog.svelte";
+  import FeatureTour from "$lib/components/FeatureTour.svelte";
+  import { tour, startTour, startWhatsNew, finishTour, tourSeen, pendingWhatsNew } from "$lib/tour.svelte.js";
   import NowPlaying from "$lib/components/NowPlaying.svelte";
   import NowPlayingPanel from "$lib/components/NowPlayingPanel.svelte";
   import QueuePanel from "$lib/components/QueuePanel.svelte";
@@ -94,6 +99,22 @@
   // pages) is let go to save memory; playback, the queue and history carry
   // on, and it all comes back when the window does.
   let uiAsleep = $state(false);
+
+  // The feature tour, once: when the app first shows for real, logged in or
+  // with your own files, so it doesn't compete with setting up or logging in.
+  // After an update, what's new instead, once (tourSteps.js).
+  $effect(() => {
+    if (!appOpen || uiAsleep || miniMode || !(loggedIn || localOnly) || tour.open) return;
+    if (!tourSeen()) {
+      const handle = setTimeout(startTour, 1200);
+      return () => clearTimeout(handle);
+    }
+    if (!tour.version) return;
+    const news = untrack(pendingWhatsNew);
+    if (news.length === 0) return;
+    const handle = setTimeout(() => startWhatsNew(news), 1200);
+    return () => clearTimeout(handle);
+  });
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let asleepHandle;
 
@@ -114,6 +135,24 @@
     uiAsleep = true;
   }
   let showSidebar = $state(true);
+  const LIBRARY_COLLAPSED_KEY = "spotilarp.libraryCollapsed";
+  /** Your Library as a strip of covers. */
+  let libraryCollapsed = $state(readLibraryCollapsed());
+
+  function readLibraryCollapsed() {
+    try {
+      return localStorage.getItem(LIBRARY_COLLAPSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  function toggleLibraryCollapsed() {
+    libraryCollapsed = !libraryCollapsed;
+    try {
+      localStorage.setItem(LIBRARY_COLLAPSED_KEY, String(libraryCollapsed));
+    } catch {}
+  }
   let showShortcuts = $state(false);
   let lyricsFullscreen = $state(false);
   let launchCommandsRun = false;
@@ -183,7 +222,8 @@
 
   /** @param {number} index */
   function pickResult(index) {
-    playFromList(shownResults, index, `Search: "${searchQuery.trim()}"`);
+    const query = searchQuery.trim();
+    playFromList(shownResults, index, `"${query}"`, { type: "search", query });
     clearTimeout(debounceHandle);
     searchToken++;
     showDropdown = false;
@@ -526,6 +566,8 @@
     // Friends can listen along from the Discord status whenever it's showing.
     api.hasDiscordClientId().then(setDiscordSharing).catch(() => {});
     loadLibrary();
+    // What Spotify's other apps played while SpotiLarp was closed, for the tracker.
+    syncSpotifyPlays();
     if (!launchCommandsRun) {
       launchCommandsRun = true;
       runLaunchCommands();
@@ -889,8 +931,8 @@
   </header>
 
   <div class="body">
-    <aside class="sidebar-area" class:collapsed={!showSidebar}>
-      <PlaylistSidebar {loggedIn} />
+    <aside class="sidebar-area" class:collapsed={!showSidebar} class:rail={libraryCollapsed}>
+      <PlaylistSidebar {loggedIn} collapsed={libraryCollapsed} onToggleCollapsed={toggleLibraryCollapsed} />
     </aside>
     <main class="content-area">
       <MainContent {loggedIn} {loggingIn} onRelogin={relogin} onChangeClientId={changeClientId} />
@@ -908,6 +950,7 @@
       {:else}
         <NowPlayingPanel
           contextName={jam.role === "guest" ? `${jam.hostName || "Someone"}'s Jam` : contextLabel() || null}
+          contextView={jam.role === "guest" || autoplaying() ? null : queue.contextView}
           visible={showPanel}
           onClose={() => (showPanel = false)}
           onShowQueue={() => (panelView = "queue")}
@@ -934,6 +977,9 @@
 <TrackContextMenu />
 {#if showShortcuts}
   <ShortcutsDialog onClose={() => (showShortcuts = false)} />
+{/if}
+{#if tour.open && appOpen && !miniMode && !uiAsleep}
+  <FeatureTour steps={tour.steps} label={tour.label} onClose={finishTour} />
 {/if}
 </div>
 
@@ -1540,6 +1586,18 @@ h1 {
   background: var(--sidebar-bg);
   border-radius: var(--radius-md);
   margin: 0.5em 0.5em 0.5em 0.5em;
+  transition: width 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+/* The covers (40px) with the same room either side as when it's open.
+   Shutting waits for the library's text to fade out first. */
+.sidebar-area.rail {
+  width: calc(40px + 2em);
+  transition-delay: 70ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-area {
+    transition: none;
+  }
 }
 
 .content-area {

@@ -5,6 +5,7 @@ import { consumeEndOfTrackStop } from "./sleep.svelte.js";
 import { markPlayed } from "./played.svelte.js";
 import { smartOrder, shuffleInPlace } from "./smartShuffle.js";
 import { isEpisode, resumeAt, setPlayed } from "./podcasts.svelte.js";
+import { connect } from "./connect.svelte.js";
 
 const STORAGE_KEY = "spotilarp.queue";
 const SAVE_DELAY_MS = 500;
@@ -218,10 +219,14 @@ export function toggleAutoplay() {
   persist();
 }
 
-export function contextLabel() {
+/** Whether the song playing is autoplay's, after the list ran out. */
+export function autoplaying() {
   const index = queue.order[queue.position];
-  const autoplaying = !queue.fromManual && queue.autoplayStart >= 0 && index >= queue.autoplayStart;
-  return autoplaying ? "Autoplay" : queue.contextName;
+  return !queue.fromManual && queue.autoplayStart >= 0 && index >= queue.autoplayStart;
+}
+
+export function contextLabel() {
+  return autoplaying() ? "Autoplay" : queue.contextName;
 }
 
 function extendWithAutoplay() {
@@ -322,7 +327,7 @@ export async function playFromList(list, index, contextName = "", contextView = 
   if (guest) return guest.add(list.slice(Math.max(index, 0), Math.max(index, 0) + 1));
   contextVersion++;
   queue.contextView = contextView;
-  if (contextView) markPlayed(contextView);
+  if (contextView) markPlayed(contextView, list);
   queue.tracks = list;
   queue.order = buildOrder(list, index);
   queue.position = shuffling() ? 0 : Math.max(index, 0);
@@ -336,6 +341,8 @@ export async function playFromList(list, index, contextName = "", contextView = 
 
 export async function next() {
   if (guest) return guest.control("next");
+  // Another Spotify app is playing on SpotiLarp: its queue, not this one.
+  if (connect.output === "receiving") return api.connectControl("next").catch((e) => notify(`${e}`));
   if (queue.manual.length > 0) {
     queue.current = /** @type {Track} */ (queue.manual.shift());
     queue.fromManual = true;

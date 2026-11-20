@@ -13,6 +13,7 @@ use crate::discord::PresenceUpdate;
 use crate::jam::JamState;
 use crate::local_files::LocalIndex;
 use crate::media::MediaUpdate;
+use crate::playback::connect::{ConnectHandle, ConnectState};
 use crate::playback::events::EventSender;
 use crate::playback::local::LocalPlayer;
 use crate::remote::RemoteCommand;
@@ -22,6 +23,8 @@ pub struct PlaybackHandle {
     pub session: Session,
     pub player: Arc<Player>,
     pub mixer: Arc<dyn Mixer>,
+    /// SpotiLarp's Spotify Connect device, when it's turned on (playback/connect.rs).
+    pub connect: Option<ConnectHandle>,
 }
 
 pub struct MiniRestore {
@@ -52,6 +55,8 @@ pub struct AppState {
     pub clock_generation: std::sync::atomic::AtomicU64,
     /// The Jam being hosted or listened in on (jam.rs).
     pub jam: JamState,
+    /// Where the music is coming out: here, or another Spotify Connect device (playback/connect.rs).
+    pub connect: ConnectState,
 }
 
 impl AppState {

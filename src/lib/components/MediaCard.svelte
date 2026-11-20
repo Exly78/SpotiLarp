@@ -2,10 +2,11 @@
   import PlayButton from "./PlayButton.svelte";
 
   /**
-   * `onplay` adds the play button that comes up over the picture on hover.
-   * @type {{ image: string|null, title: string, subtitle?: string, round?: boolean, onclick: () => void, onplay?: () => void }}
+   * `onplay` adds the play button that comes up over the picture on hover;
+   * `overlay` is drawn over the picture, under the button.
+   * @type {{ image: string|null, title: string, subtitle?: string, round?: boolean, onclick: () => void, onplay?: () => void, overlay?: import("svelte").Snippet }}
    */
-  let { image, title, subtitle = "", round = false, onclick, onplay } = $props();
+  let { image, title, subtitle = "", round = false, onclick, onplay, overlay } = $props();
 </script>
 
 <div class="card">
@@ -16,6 +17,9 @@
       <img src={image} alt="" class="art" class:round loading="lazy" />
     {:else}
       <div class="art placeholder" class:round></div>
+    {/if}
+    {#if overlay}
+      <div class="overlay" class:round>{@render overlay()}</div>
     {/if}
     {#if onplay}
       <div class="play">
@@ -72,6 +76,16 @@
 }
 .art.placeholder {
   background: linear-gradient(135deg, var(--surface-raised), var(--surface-hover));
+}
+.overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  pointer-events: none;
+}
+.overlay.round {
+  border-radius: 50%;
 }
 .play {
   position: absolute;

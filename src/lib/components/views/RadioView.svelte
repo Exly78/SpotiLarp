@@ -11,6 +11,19 @@
   export function clearRadioCache() {
     mixes.clear();
   }
+
+  /** @param {string} seed */
+  export function cachedMix(seed) {
+    return mixes.get(seed);
+  }
+
+  /**
+   * @param {string} seed
+   * @param {import("../../types.js").Track[]} tracks
+   */
+  export function cacheMix(seed, tracks) {
+    mixes.set(seed, tracks);
+  }
 </script>
 
 <script>

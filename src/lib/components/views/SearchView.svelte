@@ -63,7 +63,7 @@
 {:else}
   {#if results.tracks.length > 0}
     <Section title="Songs">
-      <TrackList tracks={results.tracks} contextName={`Search: "${query}"`} contextView={view} primary />
+      <TrackList tracks={results.tracks} contextName={`"${query}"`} contextView={view} primary />
       {#if moreAvailable}
         <button type="button" class="more" onclick={loadMore} disabled={loadingMore}>
           {loadingMore ? "Loading..." : "Show more"}
@@ -108,7 +108,7 @@
   {/if}
   {#if episodes.length > 0}
     <Section title="Episodes">
-      <EpisodeList {episodes} contextName={`Search: "${query}"`} contextView={view} />
+      <EpisodeList {episodes} contextName={`"${query}"`} contextView={view} />
     </Section>
   {/if}
 {/if}

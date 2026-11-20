@@ -6,6 +6,7 @@ mod discord;
 mod discord_account;
 mod http;
 mod jam;
+mod lastfm;
 mod local_files;
 mod lyrics;
 mod media;
@@ -18,6 +19,7 @@ mod state;
 mod themes;
 #[cfg(target_os = "windows")]
 mod thumbbar;
+mod tracker;
 mod tray;
 mod video;
 mod window_state;
@@ -92,6 +94,7 @@ pub fn run() {
             background: std::sync::atomic::AtomicBool::new(false),
             clock_generation: std::sync::atomic::AtomicU64::new(0),
             jam: Default::default(),
+            connect: Default::default(),
         })
         .register_uri_scheme_protocol(local_files::COVER_SCHEME, |_ctx, request| {
             local_files::serve_cover(&request)
@@ -134,6 +137,7 @@ pub fn run() {
 
             let state = app.state::<AppState>();
             let _ = state.playback_events.set(playback::events::spawn_hub(app.handle().clone()));
+            playback::spotify_app::start(app.handle().clone());
             let _ = state.local_player.set(playback::local::LocalPlayer::spawn(app.handle().clone()));
 
             let tray_created = tray::create(app).is_ok();
@@ -232,6 +236,12 @@ pub fn run() {
             commands::create_playlist,
             commands::get_user_id,
             commands::missing_scopes,
+            commands::connect_status,
+            commands::spotify_app_status,
+            commands::spotify_app_setup,
+            commands::connect_devices,
+            commands::connect_select,
+            commands::connect_control,
             commands::get_playlists,
             commands::get_playlist_tracks,
             commands::get_liked_songs,
@@ -278,12 +288,26 @@ pub fn run() {
             commands::connect_discord,
             commands::refresh_discord_account,
             commands::disconnect_discord,
+            // Last.fm
+            lastfm::lastfm_status,
+            lastfm::lastfm_set_keys,
+            lastfm::lastfm_connect,
+            lastfm::lastfm_cancel_connect,
+            lastfm::lastfm_disconnect,
+            lastfm::lastfm_now_playing,
+            lastfm::lastfm_scrobble,
             commands::jam_host,
             commands::jam_notify,
             commands::jam_join,
             commands::jam_send,
             commands::jam_remove,
-            commands::jam_leave
+            commands::jam_leave,
+            // Listening tracker
+            tracker::tracker_load,
+            tracker::tracker_record,
+            tracker::tracker_update_tracks,
+            tracker::tracker_clear,
+            tracker::tracker_import
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

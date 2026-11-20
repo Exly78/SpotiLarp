@@ -90,6 +90,17 @@
  */
 
 /**
+ * A song as the listening tracker keeps it. Imported history only names the
+ * album's artist (no ids) and has no pictures until they're looked up.
+ * @typedef {Object} TrackerTrack
+ * @property {string} uri `spotilarp:unmatched:...` for imported plays no song was found for
+ * @property {string} name
+ * @property {Artist[]} artists
+ * @property {{ id: string, name: string, image?: string|null }} album
+ * @property {number} duration_ms
+ */
+
+/**
  * @typedef {Object} ArtistDetails
  * @property {string} id
  * @property {string} name
@@ -272,6 +283,9 @@
  * @property {string|null} output_device
  * @property {string[]} local_folders
  * @property {boolean} discord_local_covers
+ * @property {boolean} connect_enabled shows in other Spotify apps' device lists, and plays on theirs
+ * @property {string} connect_name
+ * @property {boolean} connect_spotify_app plays through the Spotify app on this computer when it's open
  */
 
 /**

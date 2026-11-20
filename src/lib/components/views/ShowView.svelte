@@ -38,7 +38,9 @@
 
   const saved = $derived(isShowSaved(id));
   const title = $derived.by(() => show?.name ?? name);
-  const view = $derived(/** @type {import("../../nav.svelte.js").View} */ ({ type: "show", id, name: title }));
+  const view = $derived.by(
+    () => /** @type {import("../../nav.svelte.js").View} */ ({ type: "show", id, name: title, image: coverAtLeast(show?.images, 300) }),
+  );
   const shown = $derived(hidePlayed ? episodes.filter((e) => !isPlayed(e)) : episodes);
   const hasMore = $derived(slotsRead < total);
   const playingHere = $derived(

@@ -1,10 +1,12 @@
 pub mod autoplay;
+pub mod connect;
 pub mod equalizer;
 pub mod events;
 pub mod local;
 pub mod player;
 pub mod session;
 pub mod sink;
+pub mod spotify_app;
 pub mod token_store;
 
 pub const CONNECT_OAUTH_REDIRECT_PORT: u16 = 8899;

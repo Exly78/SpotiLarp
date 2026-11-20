@@ -2,6 +2,8 @@ import * as api from "./api.js";
 import { playFromList, addManyToQueue } from "./queue.svelte.js";
 import { notify } from "./toast.svelte.js";
 import { cachedPlaylistTracks, cachePlaylistTracks } from "./components/views/PlaylistView.svelte";
+import { cachedMix, cacheMix } from "./components/views/RadioView.svelte";
+import { coverAtLeast } from "./utils.js";
 
 /**
  * Playing or queueing a whole playlist or album without opening its page
@@ -62,6 +64,41 @@ export async function playAlbum(album) {
     playAll(await albumTracks(album), album.name, { type: "album", id: album.id ?? "", name: album.name });
   } catch (e) {
     notify(`Couldn't play "${album.name}": ${e}`);
+  }
+}
+
+/**
+ * Spotify's radio for an artist, song, playlist or album: the same mix its
+ * page shows, if it's been opened.
+ * @param {string} seed its URI, like `spotify:artist:<id>`
+ * @param {string} name
+ * @param {string|null} [image]
+ */
+export async function playRadio(seed, name, image = null) {
+  const title = `${name} Radio`;
+  try {
+    let tracks = cachedMix(seed);
+    if (!tracks) {
+      tracks = await api.getRadioTracks(seed);
+      cacheMix(seed, tracks);
+    }
+    playAll(tracks, title, { type: "radio", seed, name, image });
+  } catch (e) {
+    notify(`Couldn't play ${title}: ${e}`);
+  }
+}
+
+/**
+ * An artist's popular songs, like their page's play button.
+ * @param {{ id: string, name: string, image?: string|null }} artist
+ */
+export async function playArtist(artist) {
+  try {
+    const page = await api.getArtistPage(artist.id);
+    const image = coverAtLeast(page.images, 300) ?? artist.image ?? null;
+    playAll(page.top_tracks, page.name || artist.name, { type: "artist", id: artist.id, name: page.name || artist.name, image });
+  } catch (e) {
+    notify(`Couldn't play ${artist.name}: ${e}`);
   }
 }
 

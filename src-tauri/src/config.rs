@@ -35,6 +35,13 @@ pub struct Settings {
     pub output_device: Option<String>,
     pub local_folders: Vec<String>,
     pub discord_local_covers: bool,
+    /// Spotify Connect (playback/connect.rs): shows in other Spotify apps' device
+    /// lists under `connect_name`, and can play on theirs.
+    pub connect_enabled: bool,
+    pub connect_name: String,
+    /// Plays through the Spotify app on this computer whenever it's open, SpotiLarp
+    /// only controlling it: through its Spicetify extension, or as a Connect device.
+    pub connect_spotify_app: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +58,9 @@ impl Default for Settings {
             output_device: None,
             local_folders: Vec::new(),
             discord_local_covers: true,
+            connect_enabled: true,
+            connect_name: "SpotiLarp".to_string(),
+            connect_spotify_app: false,
         }
     }
 }
@@ -80,6 +90,9 @@ struct Config {
     /// The connected Discord account, as last seen (discord_account.rs).
     #[serde(default)]
     discord_account: Option<crate::discord_account::DiscordProfile>,
+    /// The key the Spotify app's extension shows to connect (playback/spotify_app.rs).
+    #[serde(default)]
+    spotify_app_token: Option<String>,
 }
 
 static SAVE_LOCK: Mutex<()> = Mutex::new(());
@@ -176,6 +189,14 @@ pub fn load_jam_key() -> Option<[u8; 32]> {
 pub fn save_jam_key(key: &[u8; 32]) -> Result<(), String> {
     use base64::Engine;
     update(|config| config.jam_key = Some(base64::engine::general_purpose::STANDARD.encode(key)))
+}
+
+pub fn load_spotify_app_token() -> Option<String> {
+    load().spotify_app_token
+}
+
+pub fn save_spotify_app_token(token: &str) -> Result<(), String> {
+    update(|config| config.spotify_app_token = Some(token.to_string()))
 }
 
 pub fn save_settings(settings: &Settings) -> Result<(), String> {

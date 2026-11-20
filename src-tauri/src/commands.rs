@@ -1,5 +1,6 @@
 use std::sync::atomic::Ordering;
 
+use librespot_core::authentication::Credentials;
 use librespot_core::session::Session;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, State, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt;
@@ -16,6 +17,7 @@ use crate::local_files::{self, LocalIndex, LocalLibrary};
 use crate::lyrics::{self, LyricsResult};
 use crate::media::MediaUpdate;
 use crate::playback;
+use crate::playback::connect::Output;
 use crate::playback::local::LocalPlayer;
 use crate::remote::{self, RemoteCommand};
 use crate::romanize;
@@ -134,6 +136,7 @@ pub async fn logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), St
     state.spotify.lock().await.logout()?;
 
     let _connecting = state.playback_connect.lock().await;
+    playback::connect::reset(&app);
     state.local_active.store(false, Ordering::SeqCst);
     if let Some(local) = state.local_player.get() {
         local.stop();
@@ -174,10 +177,18 @@ async fn ensure_playback(app: &AppHandle, state: &AppState, interactive: bool) -
         }
     }
 
-    match playback::session::connect(app, state.settings().cache_limit_mb, interactive).await {
-        Ok(session) => {
-            watch_session(app.clone(), session.clone());
-            *state.playback.lock().await = Some(new_player(app, state, session));
+    let started = match playback::session::prepare(app, state.settings().cache_limit_mb, interactive).await {
+        Ok((session, credentials)) => start_session(app, state, session, credentials).await,
+        Err(e) => Err(e),
+    };
+    match started {
+        Ok(handle) => {
+            // Whatever another app was playing on SpotiLarp went with the old session.
+            if state.connect.output() == Output::Receiving {
+                playback::connect::stop_receiving(app).await;
+            }
+            watch_session(app.clone(), handle.session.clone());
+            *state.playback.lock().await = Some(handle);
             let _ = app.emit(PLAYBACK_CONNECTION_EVENT, true);
             Ok(())
         }
@@ -186,6 +197,34 @@ async fn ensure_playback(app: &AppHandle, state: &AppState, interactive: bool) -
             Err(e)
         }
     }
+}
+
+/// Connects the session, through SpotiLarp's Spotify Connect device when it's turned on.
+async fn start_session(
+    app: &AppHandle,
+    state: &AppState,
+    session: Session,
+    credentials: Credentials,
+) -> Result<PlaybackHandle, String> {
+    let settings = state.settings();
+    if settings.connect_enabled {
+        let volume = state.volume.load(Ordering::Relaxed);
+        match playback::connect::start(app, session.clone(), credentials.clone(), &settings, volume).await {
+            Ok(connect) => {
+                let mut handle = new_player(app, state, session);
+                handle.connect = Some(connect);
+                return Ok(handle);
+            }
+            // Playback still works without it. It may have connected the
+            // session before giving up, so a fresh one connects instead.
+            Err(e) => eprintln!("{e}"),
+        }
+        let session = playback::session::new_session(settings.cache_limit_mb)?;
+        playback::session::connect(&session, credentials).await?;
+        return Ok(new_player(app, state, session));
+    }
+    playback::session::connect(&session, credentials).await?;
+    Ok(new_player(app, state, session))
 }
 
 /// When Spotify drops the session (network change, sleep...), connects again
@@ -231,6 +270,7 @@ fn new_player(app: &AppHandle, state: &AppState, session: Session) -> PlaybackHa
         session,
         player: handle.player,
         mixer: handle.mixer,
+        connect: None,
     }
 }
 
@@ -263,17 +303,22 @@ pub async fn set_settings(app: AppHandle, state: State<'_, AppState>, settings: 
         return Ok(false);
     };
     let mut playback_state = state.playback.lock().await;
-    let Some(old) = playback_state.take() else {
+    let Some(mut old) = playback_state.take() else {
         return Ok(false);
     };
     if old.session.is_invalid() {
         return Ok(false);
     }
     let session = old.session.clone();
+    // The Connect device keeps its own player (and these settings until the next start).
+    let connect = old.connect.take();
     drop(old);
-    *playback_state = Some(new_player(&app, &state, session));
-    // A local file playing right now isn't affected, so it shouldn't restart.
-    Ok(!state.local_active.load(Ordering::SeqCst))
+    let mut handle = new_player(&app, &state, session);
+    handle.connect = connect;
+    *playback_state = Some(handle);
+    // A local file playing right now isn't affected, so it shouldn't restart,
+    // and nor is another device.
+    Ok(!state.local_active.load(Ordering::SeqCst) && state.connect.output() == Output::Here)
 }
 
 #[tauri::command]
@@ -467,14 +512,49 @@ pub async fn play_track(
     // Loaded but not started (joining a Jam the host has paused).
     paused: Option<bool>,
 ) -> Result<(), String> {
+    let output = state.connect.output();
     if is_local_uri(&uri) {
+        if output == Output::Remote {
+            playback::connect::come_back(&app, Some("Local files play on this computer".to_string()));
+        }
+        playback::connect::stop_receiving(&app).await;
         return play_local(&state, &uri, position_ms.unwrap_or(0)).await;
     }
+    let position_ms = position_ms.unwrap_or(0);
+    let paused = paused.unwrap_or(false);
+    // Set to play through the Spotify app here, and it's open: it plays, SpotiLarp controls.
+    let through_spotify_app =
+        output == Output::Here && state.settings().connect_spotify_app && !state.connect.here_by_choice();
+    if through_spotify_app && playback::spotify_app::connected() {
+        // Its Spicetify extension: no playback login (or Premium) needed.
+        let (id, name) = (playback::spotify_app::DEVICE_ID, playback::spotify_app::DEVICE_NAME);
+        playback::connect::play_on(&app, id.to_string(), name.to_string()).await;
+        return playback::connect::play(&app, None, &uri, position_ms, paused).await;
+    }
+    if output == Output::Remote && state.connect.on_spotify_app() {
+        return playback::connect::play(&app, None, &uri, position_ms, paused).await;
+    }
     ensure_playback(&app, &state, false).await?;
+    if through_spotify_app {
+        let _ = playback::connect::refresh_cluster(&app).await;
+    }
+    let output = match state.connect.spotify_app() {
+        Some((device_id, name)) if through_spotify_app => {
+            playback::connect::play_on(&app, device_id, name).await;
+            Output::Remote
+        }
+        _ => output,
+    };
+    if output == Output::Remote {
+        let session = spotify_session(&app, &state).await;
+        return playback::connect::play(&app, session.as_ref(), &uri, position_ms, paused).await;
+    }
+    // Playing something in SpotiLarp takes over from the app playing on it.
+    playback::connect::stop_receiving(&app).await;
     set_local_active(&state, false).await;
     let playback_state = state.playback.lock().await;
     let handle = require_playback(&playback_state)?;
-    playback::player::play_uri(&handle.player, &uri, position_ms.unwrap_or(0), !paused.unwrap_or(false))
+    playback::player::play_uri(&handle.player, &uri, position_ms, !paused)
 }
 
 #[tauri::command]
@@ -556,7 +636,8 @@ pub fn take_launch_commands(app: AppHandle) -> Vec<RemoteCommand> {
 #[tauri::command]
 pub async fn preload_track(state: State<'_, AppState>, uri: String) -> Result<(), String> {
     // librespot reports a failed preload as the current song being unavailable.
-    if is_local_uri(&uri) {
+    // Another device gets each song as it comes.
+    if is_local_uri(&uri) || state.connect.output() != Output::Here {
         return Ok(());
     }
     let playback_state = state.playback.lock().await;
@@ -1007,8 +1088,24 @@ async fn spotify_session(app: &AppHandle, state: &AppState) -> Option<Session> {
     playback_state.as_ref().map(|handle| handle.session.clone())
 }
 
+/// SpotiLarp's Connect device, while another app is playing on it.
+fn receiving(playback_state: &Option<PlaybackHandle>) -> Result<&playback::connect::ConnectHandle, String> {
+    require_playback(playback_state)?
+        .connect
+        .as_ref()
+        .ok_or_else(|| "Spotify Connect isn't on".to_string())
+}
+
 #[tauri::command]
-pub async fn pause(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn pause(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    match state.connect.output() {
+        Output::Remote => return playback::connect::pause(&app).await,
+        Output::Receiving => {
+            receiving(&*state.playback.lock().await)?.pause();
+            return Ok(());
+        }
+        Output::Here => {}
+    }
     if state.local_active.load(Ordering::SeqCst) {
         local_player(&state)?.pause();
         return Ok(());
@@ -1019,7 +1116,15 @@ pub async fn pause(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn resume(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn resume(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    match state.connect.output() {
+        Output::Remote => return playback::connect::resume(&app).await,
+        Output::Receiving => {
+            receiving(&*state.playback.lock().await)?.play();
+            return Ok(());
+        }
+        Output::Here => {}
+    }
     if state.local_active.load(Ordering::SeqCst) {
         local_player(&state)?.play();
         return Ok(());
@@ -1030,7 +1135,15 @@ pub async fn resume(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn seek(state: State<'_, AppState>, position_ms: u32) -> Result<(), String> {
+pub async fn seek(app: AppHandle, state: State<'_, AppState>, position_ms: u32) -> Result<(), String> {
+    match state.connect.output() {
+        Output::Remote => return playback::connect::seek(&app, position_ms).await,
+        Output::Receiving => {
+            receiving(&*state.playback.lock().await)?.seek(position_ms);
+            return Ok(());
+        }
+        Output::Here => {}
+    }
     if state.local_active.load(Ordering::SeqCst) {
         local_player(&state)?.seek(position_ms);
         return Ok(());
@@ -1041,12 +1154,90 @@ pub async fn seek(state: State<'_, AppState>, position_ms: u32) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn set_volume(state: State<'_, AppState>, volume: u16) -> Result<(), String> {
+pub async fn set_volume(app: AppHandle, state: State<'_, AppState>, volume: u16) -> Result<(), String> {
+    match state.connect.output() {
+        Output::Remote => return playback::connect::set_volume(&app, volume).await,
+        Output::Receiving => {
+            receiving(&*state.playback.lock().await)?.set_volume(volume);
+            return Ok(());
+        }
+        Output::Here => {}
+    }
     state.volume.store(volume, Ordering::Relaxed);
     let playback_state = state.playback.lock().await;
     if let Some(handle) = playback_state.as_ref() {
         handle.mixer.set_volume(volume);
         handle.player.emit_volume_changed_event(volume);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn spotify_app_status() -> playback::spotify_app::Status {
+    playback::spotify_app::status()
+}
+
+/// Sets up the Spicetify extension that lets SpotiLarp play through the Spotify app.
+#[tauri::command]
+pub async fn spotify_app_setup() -> Result<String, String> {
+    playback::spotify_app::setup().await
+}
+
+#[tauri::command]
+pub fn connect_status(app: AppHandle) -> playback::connect::Status {
+    playback::connect::status(&app)
+}
+
+/// The account's Spotify Connect devices.
+#[tauri::command]
+pub async fn connect_devices(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<playback::connect::Device>, String> {
+    // Without it (no Premium) there's still the Spotify app's extension.
+    let connected = ensure_playback(&app, &state, false).await;
+    match playback::connect::devices(&app).await {
+        Err(_) if connected.is_err() => connected.map(|_| Vec::new()),
+        result => result,
+    }
+}
+
+/// Plays on another Spotify Connect device, or back on this computer (`None`,
+/// or SpotiLarp's own device). The UI then sends the song it's on.
+#[tauri::command]
+pub async fn connect_select(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_id: Option<String>,
+    name: Option<String>,
+) -> Result<playback::connect::Status, String> {
+    let own_id = state
+        .playback
+        .lock()
+        .await
+        .as_ref()
+        .and_then(|handle| handle.connect.as_ref())
+        .map(|connect| connect.device_id.clone());
+    match device_id.filter(|id| Some(id) != own_id.as_ref()) {
+        None => playback::connect::choose_here(&app),
+        // Another app's music is playing here: it moves there, as in Spotify.
+        Some(id) if state.connect.output() == Output::Receiving => playback::connect::transfer(&app, &id).await?,
+        Some(id) => {
+            if id != playback::spotify_app::DEVICE_ID {
+                ensure_playback(&app, &state, false).await?;
+            }
+            playback::connect::play_on(&app, id, name.unwrap_or_else(|| "another device".to_string())).await;
+        }
+    }
+    Ok(playback::connect::status(&app))
+}
+
+/// Next and previous for the app playing on SpotiLarp (its queue, not SpotiLarp's).
+#[tauri::command]
+pub async fn connect_control(state: State<'_, AppState>, action: String) -> Result<(), String> {
+    let playback_state = state.playback.lock().await;
+    let connect = receiving(&playback_state)?;
+    match action.as_str() {
+        "next" => connect.next(),
+        "previous" => connect.previous(),
+        _ => return Err(format!("Unknown Spotify Connect action: {action}")),
     }
     Ok(())
 }

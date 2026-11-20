@@ -12,11 +12,15 @@ use crate::local_files;
 use crate::media::MediaUpdate;
 use crate::state::AppState;
 
-/// Which player an event came from: librespot for Spotify, or the local file player.
+/// Which player an event came from: librespot for Spotify, the local file
+/// player, the player other Spotify apps play on through Spotify Connect, or
+/// the other device SpotiLarp is playing on (connect.rs).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Spotify,
     Local,
+    Connect,
+    Remote,
 }
 
 pub type EventSender = UnboundedSender<(Source, PlaybackEvent)>;
@@ -54,7 +58,7 @@ pub enum PlaybackEvent {
     },
 }
 
-fn map_event(event: PlayerEvent) -> Option<PlaybackEvent> {
+pub fn map_event(event: PlayerEvent) -> Option<PlaybackEvent> {
     match event {
         PlayerEvent::Playing { position_ms, .. } => Some(PlaybackEvent::Playing { position_ms }),
         PlayerEvent::Paused { position_ms, .. } => Some(PlaybackEvent::Paused { position_ms }),
@@ -196,9 +200,16 @@ pub fn spawn_hub(app: AppHandle) -> EventSender {
         while let Some((source, mapped)) = events.recv().await {
             // Switching players stops the other one, and its late events (like a
             // Stopped landing after the new song started) mustn't reach the UI.
-            let local_active = app.state::<AppState>().local_active.load(Ordering::SeqCst);
-            let active = if local_active { Source::Local } else { Source::Spotify };
-            if source != active && !matches!(mapped, PlaybackEvent::VolumeChanged { .. }) {
+            let state = app.state::<AppState>();
+            let active = match state.connect.output() {
+                crate::playback::connect::Output::Receiving => Source::Connect,
+                crate::playback::connect::Output::Remote => Source::Remote,
+                crate::playback::connect::Output::Here if state.local_active.load(Ordering::SeqCst) => Source::Local,
+                crate::playback::connect::Output::Here => Source::Spotify,
+            };
+            let own_volume = matches!(mapped, PlaybackEvent::VolumeChanged { .. })
+                && matches!(source, Source::Spotify | Source::Local);
+            if source != active && !own_volume {
                 continue;
             }
             match &mapped {

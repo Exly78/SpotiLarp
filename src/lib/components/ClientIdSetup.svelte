@@ -68,7 +68,7 @@
 
 <div class="setup-screen">
   <div class="setup-card">
-    <img src="/favicon.png" alt="" class="logo" />
+    <img src="/logo.png" alt="" class="logo" />
     <h1>Set up SpotiLarp</h1>
     <p class="intro">
       SpotiLarp talks to Spotify through your own free developer app. It takes about a minute and
@@ -87,7 +87,7 @@
         <span class="number">2</span>
         <div class="step">
           <div class="step-title">Click <strong>Create app</strong></div>
-          <div class="step-note">Any name and description will do.</div>
+          <div class="step-note">Any name and description will do. If it asks which APIs you'll use, tick <strong>Web API</strong>.</div>
         </div>
       </li>
       <li>
@@ -104,6 +104,7 @@
         <span class="number">4</span>
         <div class="step">
           <div class="step-title">Paste the app's <strong>Client ID</strong> here</div>
+          <div class="step-note">Made one on another computer? The same Client ID works here too.</div>
           <input
             type="text"
             placeholder="32 letters and numbers"
@@ -145,11 +146,15 @@
   width: 100%;
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 2em;
-  background: linear-gradient(var(--surface-hover), var(--bg) 60%);
+  background: var(--bg);
+  /* So the logo's ripples (.setup-card::before) sit on this black, under the card. */
+  isolation: isolate;
 }
 .setup-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -160,13 +165,33 @@
   margin: auto;
   padding: 2.5em;
   border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  /* Lit from the top, where the logo is. */
+  background: radial-gradient(ellipse 70% 220px at 50% 0, rgba(30, 215, 96, 0.1), transparent), var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border), 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+/* The logo's sound-wave arcs, rippling out from behind it and fading. Centered
+   on the logo, and small enough to end inside the card's height, so the page
+   doesn't scroll for it. */
+.setup-card::before {
+  content: "";
+  position: absolute;
+  top: calc(2.5em + 36px);
+  left: 50%;
+  z-index: -1;
+  width: 1000px;
+  height: 1000px;
+  transform: translate(-50%, -50%);
+  background:
+    repeating-radial-gradient(circle, transparent 0 41px, rgba(30, 215, 96, 0.18) 42px 43px),
+    radial-gradient(circle, rgba(30, 215, 96, 0.16), transparent 50%);
+  -webkit-mask-image: radial-gradient(circle, #000 20%, transparent 70%);
+  mask-image: radial-gradient(circle, #000 20%, transparent 70%);
+  pointer-events: none;
 }
 .logo {
-  width: 56px;
-  height: 56px;
-  border-radius: var(--radius-lg);
+  width: 72px;
+  height: 72px;
+  filter: drop-shadow(0 6px 24px rgba(30, 215, 96, 0.35));
 }
 h1 {
   margin: 0;

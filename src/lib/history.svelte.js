@@ -1,62 +1,38 @@
 import { listen } from "@tauri-apps/api/event";
 import { player } from "./player.svelte.js";
-import { queue, slim, setLastPlayedLookup } from "./queue.svelte.js";
+import { queue, setLastPlayedLookup } from "./queue.svelte.js";
+import { tracker, allPlays, recordPlay } from "./tracker.svelte.js";
+import { EPISODE_URI_PREFIX } from "./constants.js";
 
 /**
- * Songs played in SpotiLarp, which Spotify's own history doesn't include
- * (librespot doesn't report plays). Kept on this computer only.
+ * Notices songs played in SpotiLarp, which Spotify's own history doesn't
+ * include (librespot doesn't report plays), for the listening tracker. A play
+ * counts after 30 seconds or half of a shorter song; paused time and seeking
+ * don't count. It's saved when it counts, again when paused, and once more
+ * when it ends, with how long was heard and whether it was skipped. Podcast
+ * episodes keep their own progress (podcasts.svelte.js) and aren't counted.
  */
 
-const STORAGE_KEY = "spotilarp.history";
-const SAVE_DELAY_MS = 1000;
-const MAX_ENTRIES = 1000;
-/** A play counts after this long, or half of a shorter song. Paused time and seeking don't count. */
 const COUNT_AFTER_MS = 30_000;
 const CHECK_EVERY_MS = 1000;
-
-/**
- * @typedef {import("./types.js").Track} Track
- * @typedef {{ track: Track, playedAt: string }} HistoryEntry
- */
-
-/** @type {{ entries: HistoryEntry[] }} newest first */
-export const history = $state({ entries: readSaved() });
+/** Moving on this close to the end isn't skipping. */
+const FINISHED_WITHIN_MS = 10_000;
 
 let currentUri = "";
 let currentDurationMs = 0;
-/** The playing song as it'll be saved, taken when it starts. @type {Track|null} */
+/** The playing song as it'll be saved, taken when it starts. @type {import("./types.js").Track|null} */
 let currentTrack = null;
+/** When it first played (ms since 1970), the play's key in the tracker. */
+let startedAt = 0;
 let listenedMs = 0;
 let playingSince = 0;
 let counted = false;
-/** @type {ReturnType<typeof setTimeout>|undefined} */
-let saveHandle;
+let ended = false;
 
-function readSaved() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    if (Array.isArray(saved)) return saved.filter((entry) => entry?.track?.uri && entry.playedAt);
-  } catch {}
-  return [];
-}
-
-function persist() {
-  clearTimeout(saveHandle);
-  saveHandle = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify($state.snapshot(history.entries)));
-    } catch {}
-  }, SAVE_DELAY_MS);
-}
-
-function stopClock() {
-  if (playingSince) listenedMs += performance.now() - playingSince;
-  playingSince = 0;
-}
-
-/** @returns {Track|null} */
+/** @returns {import("./types.js").Track|null} */
 function playingTrack() {
-  if (queue.current?.uri === currentUri) return slim(queue.current);
+  // The queue's copy has every size of the cover.
+  if (queue.current?.uri === currentUri) return queue.current;
   const t = player.track;
   if (!t || t.uri !== currentUri) return null;
   return {
@@ -69,37 +45,56 @@ function playingTrack() {
   };
 }
 
+function heardMs() {
+  return listenedMs + (playingSince ? performance.now() - playingSince : 0);
+}
+
+function stopClock() {
+  if (playingSince) listenedMs += performance.now() - playingSince;
+  playingSince = 0;
+}
+
 function check() {
-  if (counted || !currentUri) return;
-  const listened = listenedMs + (playingSince ? performance.now() - playingSince : 0);
+  if (counted || ended || !currentUri || currentUri.startsWith(EPISODE_URI_PREFIX)) return;
   const duration = currentDurationMs;
   const needed = duration > 0 ? Math.min(COUNT_AFTER_MS, duration / 2) : COUNT_AFTER_MS;
-  if (listened < needed) return;
+  if (heardMs() < needed) return;
   const track = currentTrack ?? playingTrack();
   if (!track) return;
+  currentTrack = track;
   counted = true;
-  history.entries = [{ track, playedAt: new Date().toISOString() }, ...history.entries].slice(0, MAX_ENTRIES);
-  persist();
+  recordPlay(track, startedAt, heardMs(), false);
 }
 
-export function clearHistory() {
-  history.entries = [];
-  persist();
+/**
+ * The play is over: saved with how long it lasted.
+ * @param {boolean} finished it played to the end
+ */
+function end(finished) {
+  // In a hidden window the every-second check can fall behind.
+  check();
+  stopClock();
+  if (ended) return;
+  ended = true;
+  if (!counted || !currentTrack) return;
+  const heard = heardMs();
+  const skipped = !finished && heard < currentDurationMs - FINISHED_WITHIN_MS;
+  recordPlay(currentTrack, startedAt, heard, skipped);
 }
 
-/** @type {{ entries: HistoryEntry[]|null, at: Map<string, number> }} */
-const lastPlayed = { entries: null, at: new Map() };
+/** When each song was last played (ms since 1970), from every source. */
+let lastPlayedVersion = -1;
+/** @type {Map<string, number>} */
+let lastPlayedAt = new Map();
 
 // Smart shuffle plays what was heard lately last.
 setLastPlayedLookup((track) => {
-  if (lastPlayed.entries !== history.entries) {
-    lastPlayed.entries = history.entries;
-    lastPlayed.at = new Map();
-    for (const entry of history.entries) {
-      if (!lastPlayed.at.has(entry.track.uri)) lastPlayed.at.set(entry.track.uri, Date.parse(entry.playedAt) || 0);
-    }
+  const plays = allPlays();
+  if (lastPlayedVersion !== tracker.version) {
+    lastPlayedVersion = tracker.version;
+    lastPlayedAt = new Map(plays.map((play) => [play.track.uri, play.t]));
   }
-  return lastPlayed.at.get(track.uri) ?? 0;
+  return lastPlayedAt.get(track.uri) ?? 0;
 });
 
 setInterval(check, CHECK_EVERY_MS);
@@ -108,27 +103,33 @@ listen("player-event", (event) => {
   const e = /** @type {import("./types.js").PlaybackEvent} */ (event.payload);
   switch (e.type) {
     case "TrackChanged":
-      // The song before may have been heard long enough: in a hidden window
-      // the every-second check can fall behind.
-      check();
+      end(false);
       // Every load is its own play, repeats of the same song included.
       currentUri = e.uri ?? "";
       currentDurationMs = e.duration_ms ?? 0;
       currentTrack = null;
+      startedAt = 0;
       listenedMs = 0;
       playingSince = 0;
       counted = false;
+      ended = false;
       break;
     case "Playing":
+      if (!startedAt) startedAt = Date.now();
       if (!playingSince) playingSince = performance.now();
       currentTrack ??= playingTrack();
       break;
     case "Paused":
-    case "Stopped":
-    case "EndOfTrack":
-    case "Unavailable":
       check();
       stopClock();
+      if (counted && !ended && currentTrack) recordPlay(currentTrack, startedAt, heardMs(), false);
+      break;
+    case "EndOfTrack":
+      end(true);
+      break;
+    case "Stopped":
+    case "Unavailable":
+      end(false);
       break;
   }
 });

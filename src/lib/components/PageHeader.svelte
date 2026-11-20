@@ -94,8 +94,9 @@
   display: flex;
   align-items: flex-end;
   gap: 1.5em;
-  /* Out to the panel's edges (.content-area's padding, +page.svelte). */
-  margin: calc(-1 * var(--content-pad-y, 0px)) calc(-1 * var(--content-pad-x, 0px)) 0;
+  /* Out to the panel's sides (.content-area's padding, +page.svelte); the
+     sticky bar above has already brought it up to the top edge. */
+  margin: 0 calc(-1 * var(--content-pad-x, 0px));
   padding: calc(var(--content-pad-y, 0px) + 2.5em) var(--content-pad-x, 0px) 1.5em;
 }
 /* The colors sit behind the page (.results-area is their stacking context) and fade in once known. */
@@ -203,8 +204,10 @@ h1 {
   align-items: center;
   gap: 1em;
   height: 64px;
-  /* Takes no room in the page, and reaches the panel's edges like the header. */
-  margin: 0 calc(-1 * var(--content-pad-x, 0px)) -64px;
+  /* Takes no room in the page, and reaches the panel's edges. The header below
+     starts where this does: a pull-up of its own would collapse into this -64px
+     margin and be lost, leaving a strip of panel above the header's color. */
+  margin: calc(-1 * var(--content-pad-y, 0px)) calc(-1 * var(--content-pad-x, 0px)) -64px;
   padding: 0 var(--content-pad-x, 0px);
   background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45)), var(--tint, var(--surface-raised));
   box-shadow: 0 6px 10px rgba(0, 0, 0, 0.35);

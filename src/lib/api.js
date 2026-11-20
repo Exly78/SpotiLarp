@@ -144,6 +144,34 @@ export const resume = () => invoke("resume");
 export const seek = (positionMs) => invoke("seek", { positionMs });
 /** @param {number} volume */
 export const setVolume = (volume) => invoke("set_volume", { volume });
+
+/**
+ * @typedef {{ output: "here"|"receiving"|"remote", device: string|null, device_id: string|null, reason: string|null }} ConnectStatus
+ * @typedef {{ id: string, name: string, kind: string, active: boolean, here: boolean, volume: number|null, restricted: boolean }} ConnectDevice
+ */
+/** @returns {Promise<ConnectStatus>} */
+export const connectStatus = () => invoke("connect_status");
+/** @returns {Promise<ConnectDevice[]>} */
+export const connectDevices = () => invoke("connect_devices");
+/**
+ * Plays on another Spotify Connect device, or back here with `null`.
+ * @param {string|null} deviceId
+ * @param {string} [name]
+ * @returns {Promise<ConnectStatus>}
+ */
+export const connectSelect = (deviceId, name) => invoke("connect_select", { deviceId, name });
+/** @param {"next"|"previous"} action for the app playing on SpotiLarp */
+export const connectControl = (action) => invoke("connect_control", { action });
+/**
+ * Whether the Spotify app's Spicetify extension is connected (and Spicetify installed to set it up).
+ * @returns {Promise<{ connected: boolean, spicetify: boolean }>}
+ */
+export const spotifyAppStatus = () => invoke("spotify_app_status");
+/**
+ * Sets up the Spicetify extension that lets SpotiLarp play through the Spotify app (restarts Spotify).
+ * @returns {Promise<string>}
+ */
+export const spotifyAppSetup = () => invoke("spotify_app_setup");
 /**
  * Spotify's own lyrics when the song is on Spotify and playback is connected, otherwise LRCLIB's.
  * @param {string|null} trackId
@@ -269,6 +297,27 @@ export const getTopTracks = (timeRange, limit) => invoke("get_top_tracks", { tim
  * @returns {Promise<import("./types.js").ArtistDetails[]>}
  */
 export const getTopArtists = (timeRange, limit) => invoke("get_top_artists", { timeRange, limit });
+
+/**
+ * The listening tracker's songs and plays (`[started, ms heard, song index,
+ * source, skipped]`, oldest first).
+ * @returns {Promise<{ tracks: import("./types.js").TrackerTrack[], plays: [number, number, number, number, number][] }>}
+ */
+export const trackerLoad = () => invoke("tracker_load");
+/**
+ * Saves plays; returns how many weren't already saved.
+ * @param {{ t: number, ms: number, src: number, skip: boolean, track: import("./types.js").TrackerTrack }[]} plays
+ * @returns {Promise<number>}
+ */
+export const trackerRecord = (plays) => invoke("tracker_record", { plays });
+/** @param {import("./types.js").TrackerTrack[]} tracks */
+export const trackerUpdateTracks = (tracks) => invoke("tracker_update_tracks", { tracks });
+export const trackerClear = () => invoke("tracker_clear");
+/**
+ * Asks for the folder Spotify's data download unzipped to and imports it; null if none was picked.
+ * @returns {Promise<{ files: number, found: number, added: number, duplicates: number, too_short: number, unmatched: number }|null>}
+ */
+export const trackerImport = () => invoke("tracker_import");
 /**
  * @param {string} playlistId
  * @param {string[]} uris
@@ -376,3 +425,33 @@ export const connectDiscord = () => invoke("connect_discord");
  */
 export const refreshDiscordAccount = () => invoke("refresh_discord_account");
 export const disconnectDiscord = () => invoke("disconnect_discord");
+
+/**
+ * Last.fm (lastfm.rs): whether it's connected, as whom, and how many scrobbles wait to be sent.
+ * @returns {Promise<{ connected: boolean, username: string|null, has_keys: boolean, queued: number }>}
+ */
+export const lastfmStatus = () => invoke("lastfm_status");
+/**
+ * Your own Last.fm API account; a different key needs connecting again.
+ * @param {string} apiKey
+ * @param {string} secret
+ */
+export const lastfmSetKeys = (apiKey, secret) => invoke("lastfm_set_keys", { apiKey, secret });
+/**
+ * Opens Last.fm's "allow access" page and waits for it; rejects with LOGIN_CANCELLED when cancelled.
+ * @returns {Promise<string>} the username
+ */
+export const lastfmConnect = () => invoke("lastfm_connect");
+export const lastfmCancelConnect = () => invoke("lastfm_cancel_connect");
+export const lastfmDisconnect = () => invoke("lastfm_disconnect");
+/**
+ * @typedef {{ artist: string, track: string, album?: string|null, duration?: number|null }} LastfmTrack `duration` in seconds
+ * @param {LastfmTrack} track
+ */
+export const lastfmNowPlaying = (track) => invoke("lastfm_now_playing", { track });
+/**
+ * Sends scrobbles (and any still waiting); what can't go now waits for next time.
+ * @param {(LastfmTrack & { timestamp: number })[]} scrobbles `timestamp` is when the song started, in seconds
+ * @returns {Promise<number>} how many are still waiting
+ */
+export const lastfmScrobble = (scrobbles) => invoke("lastfm_scrobble", { scrobbles });

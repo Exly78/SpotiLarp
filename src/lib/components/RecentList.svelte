@@ -1,54 +1,30 @@
 <script>
   import { onMount } from "svelte";
-  import * as api from "../api.js";
-  import { history } from "../history.svelte.js";
+  import { tracker, recentPlays, syncSpotifyPlays, asTrack, isPlayable } from "../tracker.svelte.js";
   import { playFromList } from "../queue.svelte.js";
   import { player } from "../player.svelte.js";
   import { openTrackMenu } from "../contextMenu.svelte.js";
   import { startTrackDrag, endDrag } from "../drag.svelte.js";
-  import { smallestCover } from "../utils.js";
+  import { smallestCover, timeAgo } from "../utils.js";
 
   /** @typedef {import("../types.js").Track} Track */
 
-  /** The same play from both histories is shown once. */
-  const SAME_PLAY_MS = 3 * 60_000;
   const SHOWN = 100;
 
-  /** @type {Track[]} */
-  let spotifyRecent = $state([]);
-  let loading = $state(true);
-
   const origin = Symbol("recent");
-  const timeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
+  // The tracker has SpotiLarp's plays; this brings in what Spotify's other apps played since it last asked.
   onMount(() => {
-    api
-      .getRecentlyPlayed()
-      .then((tracks) => (spotifyRecent = tracks))
-      .catch(() => {})
-      .finally(() => (loading = false));
+    syncSpotifyPlays();
   });
 
-  const entries = $derived.by(() => {
-    const local = history.entries.map((entry) => ({ track: entry.track, at: Date.parse(entry.playedAt) }));
-    const remote = spotifyRecent
-      .map((track) => ({ track, at: Date.parse(track.added_at ?? "") }))
-      .filter(
-        (entry) =>
-          !Number.isNaN(entry.at) &&
-          !local.some((l) => l.track.uri === entry.track.uri && Math.abs(l.at - entry.at) < SAME_PLAY_MS),
-      );
-    return [...local, ...remote].sort((a, b) => b.at - a.at).slice(0, SHOWN);
-  });
-
-  /** @param {number} at */
-  function ago(at) {
-    const minutes = Math.round((at - Date.now()) / 60_000);
-    if (minutes > -60) return timeFormatter.format(Math.min(minutes, 0), "minute");
-    const hours = Math.round(minutes / 60);
-    if (hours > -24) return timeFormatter.format(hours, "hour");
-    return timeFormatter.format(Math.round(hours / 24), "day");
-  }
+  const entries = $derived(
+    recentPlays(SHOWN * 2)
+      .filter((play) => isPlayable(play.track))
+      .slice(0, SHOWN)
+      .map((play) => ({ track: asTrack(play.track), at: play.t })),
+  );
+  const loading = $derived(!tracker.loaded || tracker.syncing);
 
   // A recent row plays that song on its own (autoplay carries on after it).
   /** @param {Track} track */
@@ -79,7 +55,7 @@
         <div class="name" class:playing={player.track?.uri === track.uri}>{track.name}</div>
         <div class="artists">{track.artists.map((a) => a.name).join(", ")}</div>
       </div>
-      <span class="when">{ago(at)}</span>
+      <span class="when">{timeAgo(at)}</span>
     </button>
   {/each}
 {/if}

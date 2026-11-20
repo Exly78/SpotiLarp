@@ -1,5 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import * as api from "../../api.js";
   import { restartAfterPlayerRebuild } from "../../player.svelte.js";
   import { queue, toggleAutoplay } from "../../queue.svelte.js";
@@ -8,8 +10,10 @@
   import { addLocalFolder, removeLocalFolder } from "../../localFiles.svelte.js";
   import Icon from "../Icon.svelte";
   import Toggle from "../Toggle.svelte";
+  import LastfmSettings from "../LastfmSettings.svelte";
   import { SHORTCUTS } from "../../keys.js";
-  import { history, clearHistory } from "../../history.svelte.js";
+  import { startTour, showLatestNews, hasNews } from "../../tour.svelte.js";
+  import { tracker, allPlays, clearTracker, importSpotifyHistory } from "../../tracker.svelte.js";
   import { episodes, clearEpisodeProgress } from "../../podcasts.svelte.js";
   import { zoom, setZoom, ZOOM_LEVELS } from "../../zoom.svelte.js";
   import { themes, loadThemes, selectTheme, applyTheme } from "../../themes.svelte.js";
@@ -42,12 +46,27 @@
 
   /** @type {import("../../types.js").Settings|null} */
   let settings = $state(null);
+  /** The Spotify app's Spicetify extension (playback/spotify_app.rs). */
+  let spotifyApp = $state({ connected: false, spicetify: false });
+  let settingUpSpotifyApp = $state(false);
   let autostart = $state(false);
   /** @type {number|null} */
   let cacheBytes = $state(null);
   let saving = $state(false);
   let clearing = $state(false);
   let choosingFolder = $state(false);
+  const playCount = $derived(allPlays().length);
+  // Years of imported history would be one click from gone: the first click asks.
+  let confirmingClear = $state(false);
+
+  function clearHistory() {
+    if (!confirmingClear) {
+      confirmingClear = true;
+      return;
+    }
+    confirmingClear = false;
+    clearTracker();
+  }
   /** @type {string[]} */
   let devices = $state([]);
   /** @type {number[]} */
@@ -121,6 +140,26 @@
     await loadThemes();
     await applyTheme();
     notify("Themes reloaded");
+  }
+
+  onMount(() => {
+    api.spotifyAppStatus().then((status) => (spotifyApp = status)).catch(() => {});
+    const unlisten = listen("spotify-app", (event) => (spotifyApp = /** @type {any} */ (event.payload)));
+    return () => {
+      unlisten.then((stop) => stop());
+    };
+  });
+
+  async function setUpSpotifyApp() {
+    settingUpSpotifyApp = true;
+    try {
+      notify(await api.spotifyAppSetup());
+    } catch (e) {
+      notify(`${e}`);
+    } finally {
+      settingUpSpotifyApp = false;
+      api.spotifyAppStatus().then((status) => (spotifyApp = status)).catch(() => {});
+    }
   }
 
   onMount(async () => {
@@ -365,6 +404,8 @@
     </div>
   </section>
 
+  <LastfmSettings />
+
   <section>
     <h2>Playback</h2>
     <div class="row">
@@ -400,6 +441,86 @@
         <div class="hint">When your music ends (and repeat is off), keep playing similar songs.</div>
       </div>
       <Toggle on={queue.autoplay} onclick={toggleAutoplay} label="Autoplay" />
+    </div>
+  </section>
+
+  <section>
+    <h2>Spotify Connect</h2>
+    <div class="row">
+      <div>
+        <div class="label">Show SpotiLarp in your Spotify apps</div>
+        <div class="hint">
+          Your phone, Spotify's desktop app and other devices on your account can play on SpotiLarp from their
+          device list, and SpotiLarp can play on theirs with the devices button next to the queue (that needs this
+          on too). Applies the next time SpotiLarp starts.
+        </div>
+      </div>
+      <Toggle
+        on={settings.connect_enabled}
+        onclick={() => update({ connect_enabled: !settings?.connect_enabled })}
+        label="Show SpotiLarp in your Spotify apps"
+        disabled={saving}
+      />
+    </div>
+    {#if settings.connect_enabled}
+      <div class="row">
+        <div>
+          <div class="label">Device name</div>
+          <div class="hint">What your other Spotify apps call SpotiLarp. Applies the next time SpotiLarp starts.</div>
+        </div>
+        <input
+          type="text"
+          class="name-input"
+          value={settings.connect_name}
+          maxlength="64"
+          placeholder="SpotiLarp"
+          spellcheck="false"
+          onchange={(e) => update({ connect_name: e.currentTarget.value.trim() || "SpotiLarp" })}
+          disabled={saving}
+          aria-label="Spotify Connect device name"
+        />
+      </div>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Spotify desktop app</h2>
+    <div class="row">
+      <div>
+        <div class="label">Play through the Spotify app</div>
+        <div class="hint">
+          When Spotify's own app is open on this computer, SpotiLarp's music plays in it (a Jam or listening along
+          too), and SpotiLarp just controls it. Picking "This computer" in the devices menu keeps it in SpotiLarp
+          until it restarts.
+        </div>
+      </div>
+      <Toggle
+        on={settings.connect_spotify_app}
+        onclick={() => update({ connect_spotify_app: !settings?.connect_spotify_app })}
+        label="Play through the Spotify app"
+        disabled={saving}
+      />
+    </div>
+    <div class="row">
+      <div>
+        <div class="label">Without Premium</div>
+        <div class="hint">
+          Spotify only takes orders from other apps for Premium accounts, so on a free one SpotiLarp reaches the Spotify
+          app through a small extension for
+          <button type="button" class="inline-link" onclick={() => openUrl("https://spicetify.app").catch(() => {})}>Spicetify</button>
+          (Spotify's ads still play, and SpotiLarp catches up after them). Set up adds it and restarts Spotify.
+          {#if spotifyApp.connected}
+            <strong>Connected to the Spotify app.</strong>
+          {:else if !spotifyApp.spicetify}
+            Install Spicetify first.
+          {:else}
+            Not connected: set it up, or open Spotify.
+          {/if}
+        </div>
+      </div>
+      <button type="button" class="secondary" onclick={setUpSpotifyApp} disabled={settingUpSpotifyApp || !spotifyApp.spicetify}>
+        {settingUpSpotifyApp ? "Setting up..." : spotifyApp.connected ? "Set up again" : "Set up"}
+      </button>
     </div>
   </section>
 
@@ -548,12 +669,27 @@
       <div>
         <div class="label">Listening history</div>
         <div class="hint">
-          Songs played in SpotiLarp, shown under Queue → Recent next to Spotify's own history (which doesn't include
-          them). Kept on this computer only. {history.entries.length}
-          {history.entries.length === 1 ? "play" : "plays"} saved.
+          What your stats are made of: songs played in SpotiLarp, what Spotify's other apps played, and any history you
+          import from Spotify's data download (Spotify account → Privacy → Download your data → Extended streaming
+          history; unzip it, then pick its folder). Kept on this computer only. {playCount.toLocaleString()}
+          {playCount === 1 ? "play" : "plays"} saved.
         </div>
       </div>
-      <button type="button" class="secondary" onclick={clearHistory} disabled={history.entries.length === 0}>Clear</button>
+      <div class="buttons">
+        <button type="button" class="secondary" onclick={importSpotifyHistory} disabled={tracker.importing}>
+          {tracker.importing ? "Importing..." : "Import..."}
+        </button>
+        <button
+          type="button"
+          class="secondary"
+          class:danger={confirmingClear}
+          onclick={clearHistory}
+          onblur={() => (confirmingClear = false)}
+          disabled={playCount === 0}
+        >
+          {confirmingClear ? `Clear ${playCount.toLocaleString()} plays?` : "Clear"}
+        </button>
+      </div>
     </div>
     <div class="row">
       <div>
@@ -645,6 +781,29 @@
   </section>
 
   <section>
+    <h2>Tour</h2>
+    <div class="row">
+      <div>
+        <div class="label">Feature tour</div>
+        <div class="hint">
+          A quick look at things that are easy to miss: the Now Playing panel, lyrics, smart shuffle, Jam and the
+          mini player.
+        </div>
+      </div>
+      <button type="button" class="secondary" onclick={startTour}>Show me</button>
+    </div>
+    {#if hasNews()}
+      <div class="row">
+        <div>
+          <div class="label">What's new</div>
+          <div class="hint">What the latest update added. It shows by itself once after each update.</div>
+        </div>
+        <button type="button" class="secondary" onclick={showLatestNews}>Show me</button>
+      </div>
+    {/if}
+  </section>
+
+  <section>
     <h2>Command line</h2>
     <div class="hint status-line">
       Run SpotiLarp's program (spotilarp.exe in its install folder on Windows) with a command to control the copy
@@ -720,6 +879,30 @@ h2 {
   gap: 0.6em;
   flex-shrink: 0;
 }
+.inline-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.name-input {
+  flex-shrink: 0;
+  width: 200px;
+  padding: 0.5em 0.9em;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--control-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+.name-input:focus {
+  border-color: var(--text);
+}
 select {
   flex-shrink: 0;
   padding: 0.5em 0.9em;
@@ -746,6 +929,10 @@ select {
 .secondary:hover:not(:disabled),
 .chip:hover {
   border-color: var(--text);
+}
+.secondary.danger {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .secondary:disabled {
   opacity: 0.5;

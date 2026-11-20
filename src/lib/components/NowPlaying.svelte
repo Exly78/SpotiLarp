@@ -16,8 +16,10 @@
   import { isEpisodeUri } from "../podcasts.svelte.js";
   import { sleep } from "../sleep.svelte.js";
   import { jam } from "../jam.svelte.js";
+  import { connect } from "../connect.svelte.js";
   import { formatTime } from "../utils.js";
   import Icon from "./Icon.svelte";
+  import DevicePicker from "./DevicePicker.svelte";
 
   const VOLUME_WHEEL_STEP = 5;
   /** How far the podcast buttons skip. */
@@ -39,6 +41,8 @@
   const durationMs = $derived(player.track?.durationMs ?? 0);
   const shownMs = $derived(dragMs ?? player.positionMs);
   const seekPct = $derived(durationMs > 0 ? Math.min(100, (shownMs / durationMs) * 100) : 0);
+  // Another Spotify app is playing on SpotiLarp: shuffle and repeat are its.
+  const receiving = $derived(connect.output === "receiving");
 
   $effect(() => {
     const id = trackId;
@@ -146,8 +150,9 @@
         <button
           type="button"
           onclick={toggleShuffle}
+          disabled={receiving}
           class="icon-button toggle-button"
-          class:active={queue.shuffle}
+          class:active={queue.shuffle && !receiving}
           aria-label={shuffleLabels().action}
           title={`${shuffleLabels().state} (click to change)`}
           aria-pressed={queue.shuffle}
@@ -166,7 +171,7 @@
       >
         <Icon name={player.isPlaying ? "pause" : "play"} size={16} />
       </button>
-      <button onclick={next} disabled={!hasNext()} class="icon-button" aria-label="Next">
+      <button onclick={next} disabled={!hasNext() && !receiving} class="icon-button" aria-label="Next">
         <Icon name="next" size={18} />
       </button>
       {#if episode}
@@ -177,8 +182,9 @@
         <button
           type="button"
           onclick={cycleRepeatMode}
+          disabled={receiving}
           class="icon-button toggle-button"
-          class:active={queue.repeatMode !== "off"}
+          class:active={queue.repeatMode !== "off" && !receiving}
           aria-label={`Repeat: ${queue.repeatMode}`}
           aria-pressed={queue.repeatMode !== "off"}
         >
@@ -247,6 +253,7 @@
     >
       <Icon name="queue" size={16} />
     </button>
+    <DevicePicker />
     <button
       type="button"
       class="icon-button mute-button"
@@ -281,6 +288,12 @@
       </button>
     {/if}
   </div>
+  {#if connect.output !== "here"}
+    <div class="connect-banner">
+      <Icon name={connect.output === "remote" ? "speaker" : "devices"} size={14} />
+      {connect.output === "remote" ? `Playing on ${connect.device ?? "another device"}` : "Another Spotify app is playing on SpotiLarp"}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -288,7 +301,8 @@
   display: grid;
   grid-template-columns: 1fr minmax(0, 2fr) 1fr;
   align-items: center;
-  gap: 1em;
+  column-gap: 1em;
+  row-gap: 0.6em;
   width: 100%;
   padding: 0.7em 1.25em;
 }
@@ -406,7 +420,23 @@
   gap: 0.6em;
   justify-self: end;
   width: 100%;
-  max-width: 260px;
+  max-width: 300px;
+  min-width: 0;
+}
+/* Across the bottom of the bar, to its edges, while the music is elsewhere. */
+.connect-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5em;
+  margin: 0 -1.25em -0.7em;
+  padding: 0.3em 1.25em;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
 }
 .mute-button,
 .queue-button,
@@ -446,9 +476,11 @@ input[type="range"]:disabled {
   cursor: default;
 }
 
+/* Shrinks with the window, rather than pushing the buttons beside it out of it. */
 .slider-wrap {
   position: relative;
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   height: 12px;
@@ -464,6 +496,7 @@ input[type="range"] {
   outline: none;
   cursor: pointer;
   flex: 1;
+  min-width: 0;
   margin: 0;
 }
 input[type="range"]::-webkit-slider-thumb {

@@ -1,8 +1,8 @@
 # SpotiLarp
 
-![version](https://img.shields.io/badge/version-1.1.0-blue)
+![version](https://img.shields.io/badge/version-1.3.0-blue)
 ![status](https://img.shields.io/badge/status-early%20WIP-orange)
-![last updated](https://img.shields.io/badge/last%20updated-2026--10--18-lightgrey)
+![last updated](https://img.shields.io/badge/last%20updated-2026--11--21-lightgrey)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri%20%2B%20SvelteKit-informational)
 
@@ -15,8 +15,9 @@ Discord Rich Presence support.
 > work-in-progress version. Use at your own risk and expect rough edges.
 
 > [!WARNING]
-> A **Spotify Premium** account is required. Spotify's playback API does not support
-> free/ad-supported accounts playback will not work without Premium.
+> A **Spotify Premium** account is required for SpotiLarp's own player. Spotify's playback
+> API does not support free/ad-supported accounts. Without Premium, SpotiLarp can still play
+> through Spotify's desktop app on the same computer (see "Without Premium" below).
 
 ## One-time Spotify setup
 
@@ -78,6 +79,12 @@ npm run tauri build
 Produces a release binary and installer(s) for your platform under
 `src-tauri/target/release/bundle/` (e.g. `msi/` on Windows).
 
+Before a release, add what's new in it to `RELEASES` in `src/lib/tourSteps.js`, under the
+version in `package.json`: each entry is a title, a sentence or two, and the control it
+points at. Everyone updating from an older version gets a short "What's new" tour of
+those steps once (and every release they skipped), and Settings → Tour shows the latest
+one again. New installs get the regular feature tour instead.
+
 ## Good to know
 
 - **Playback depends on librespot.** Browsing your library uses your own Client ID, but
@@ -124,6 +131,32 @@ Produces a release binary and installer(s) for your platform under
   its Jam. Nobody has to run a server. Windows may ask once whether SpotiLarp can use the
   network. Songs from Local Files aren't shared: listeners pause until the host plays a
   Spotify song again.
+- **Spotify Connect works both ways.** SpotiLarp shows up in your other Spotify apps' device
+  lists (your phone, Spotify's desktop app...) as "SpotiLarp" (rename it under Settings →
+  Spotify Connect; turning it off there turns off both directions), and they can play on it. While one does, the player bar says so
+  and its buttons control that app's queue; playing something in SpotiLarp takes over again.
+  The devices button next to the queue does the opposite, playing SpotiLarp's music on another
+  device: SpotiLarp's queue (smart shuffle, autoplay, a Jam) still decides what plays and sends
+  each song as it comes, so there can be a short gap between songs, and the volume slider sets
+  that device's volume. Local files only play on this computer, and starting something else
+  on that device from a Spotify app makes SpotiLarp let go of it. Like playback, this goes
+  through the playback login (as commands from SpotiLarp's own Connect device, the way
+  Spotify's apps send them), not your Client ID.
+- **SpotiLarp can play through your Spotify app.** Turn on Settings → Spotify desktop app →
+  Play through the Spotify app, and whenever Spotify's own app is open on the same computer,
+  SpotiLarp's music plays in it and SpotiLarp just controls it (picking "This computer" in the
+  devices menu keeps it in SpotiLarp until it restarts). That includes Jams and Discord's
+  **Listen along on SpotiLarp**: a friend who'd rather listen in Spotify installs SpotiLarp,
+  turns this on, and clicks Listen along, and SpotiLarp keeps their Spotify in time with you
+  from the background. Everyone still needs SpotiLarp: Spotify has no public way for its own
+  Jams and SpotiLarp's to meet.
+- **Without Premium**, Spotify won't take orders from other apps, so SpotiLarp reaches the
+  Spotify desktop app through a small extension for [Spicetify](https://spicetify.app)
+  instead. Install Spicetify, then Settings → Spotify desktop app → Set up writes SpotiLarp's extension
+  into it and restarts Spotify; with "Play through the Spotify app" on, SpotiLarp (a Jam,
+  listening along) then plays through it on a free account. Spotify's ads still play:
+  SpotiLarp shows the song paused while one's on and carries on after it. The extension only
+  talks to SpotiLarp on the same computer, with a key the two share.
 - **Discord status:** the Discord menu in the top bar turns on "Listening to SpotiLarp" on your
   Discord profile, nothing to set up.
 - **Connect Discord** (in the Discord menu in the top bar) links your Discord account through

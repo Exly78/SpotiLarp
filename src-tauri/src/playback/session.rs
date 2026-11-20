@@ -65,21 +65,27 @@ async fn obtain_credentials(app: &AppHandle, client_id: &str, interactive: bool)
     Ok(into_credentials(oauth::exchange_code(&http, client_id, &code).await?))
 }
 
-pub async fn connect(app: &AppHandle, cache_limit_mb: u64, interactive: bool) -> Result<Session, String> {
+/// A session that isn't connected yet, and the login to connect it with:
+/// Spotify Connect (connect.rs) has to connect it itself, after it starts listening.
+pub async fn prepare(app: &AppHandle, cache_limit_mb: u64, interactive: bool) -> Result<(Session, Credentials), String> {
     remove_legacy_credentials();
+    let config = SessionConfig::default();
+    let credentials = obtain_credentials(app, &config.client_id, interactive).await?;
+    Ok((new_session(cache_limit_mb)?, credentials))
+}
+
+pub fn new_session(cache_limit_mb: u64) -> Result<Session, String> {
     let (audio_dir, size_limit) = match audio_cache_dir() {
         Some(dir) if cache_limit_mb > 0 => (Some(dir), Some(cache_limit_mb * 1024 * 1024)),
         _ => (None, None),
     };
     let cache = Cache::new(None::<PathBuf>, None, audio_dir, size_limit).map_err(|e| e.to_string())?;
+    Ok(Session::new(SessionConfig::default(), Some(cache)))
+}
 
-    let config = SessionConfig::default();
-    let credentials = obtain_credentials(app, &config.client_id, interactive).await?;
-
-    let session = Session::new(config, Some(cache));
+pub async fn connect(session: &Session, credentials: Credentials) -> Result<(), String> {
     session
         .connect(credentials, false)
         .await
-        .map_err(|e| format!("failed to connect Spotify Connect session: {e}"))?;
-    Ok(session)
+        .map_err(|e| format!("failed to connect Spotify Connect session: {e}"))
 }

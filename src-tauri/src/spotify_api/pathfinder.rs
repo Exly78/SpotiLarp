@@ -356,9 +356,17 @@ pub fn artists(value: &Value) -> Vec<Artist> {
 
 pub fn album(value: &Value) -> Option<Album> {
     let uri = value.get("uri")?.as_str()?;
+    // An artist's latest release comes with its day, month and year apart.
     let release_date = match value.pointer("/date/isoString").and_then(Value::as_str) {
         Some(iso) => Some(iso.chars().take(10).collect()),
-        None => count(value, "/date/year").map(|year| year.to_string()),
+        None => count(value, "/date/year").map(|year| {
+            let precision = value.pointer("/date/precision").and_then(Value::as_str).unwrap_or("DAY");
+            match (count(value, "/date/month"), count(value, "/date/day"), precision) {
+                (_, _, "YEAR") | (None, _, _) => year.to_string(),
+                (Some(month), Some(day), "DAY") => format!("{year:04}-{month:02}-{day:02}"),
+                (Some(month), _, _) => format!("{year:04}-{month:02}"),
+            }
+        }),
     };
     Some(Album {
         id: id_from_uri(uri),

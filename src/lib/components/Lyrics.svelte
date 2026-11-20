@@ -211,6 +211,8 @@
 .lyrics {
   position: absolute;
   inset: 0;
+  /* The active line's scale-up would otherwise poke out sideways and bring up a scrollbar. */
+  overflow-x: hidden;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
