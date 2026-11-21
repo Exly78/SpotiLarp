@@ -1,7 +1,7 @@
 //! Scrobbling to Last.fm. Last.fm only lets an API account sign its calls with
 //! that account's shared secret, and SpotiLarp has no server to keep one on,
 //! so you bring your own API account (like the Spotify Client ID). The key,
-//! secret and session stay in the OS keyring.
+//! secret and session stay in the OS keyring (secret_store.rs).
 //!
 //! Signing in is Last.fm's desktop flow: get a token, approve it in the
 //! browser, then trade it for a session key. Scrobbles that can't be sent
@@ -12,12 +12,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
+
+use crate::secret_store;
 
 const API_URL: &str = "https://ws.audioscrobbler.com/2.0/";
 const AUTH_URL: &str = "https://www.last.fm/api/auth/";
@@ -400,22 +401,16 @@ fn load_session() -> Option<Session> {
 }
 
 fn forget_session() -> Result<(), String> {
-    let entry = Entry::new(KEYRING_SERVICE, KEYRING_SESSION).map_err(|e| e.to_string())?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
+    secret_store::clear(KEYRING_SERVICE, KEYRING_SESSION)
 }
 
 fn load_json<T: for<'de> Deserialize<'de>>(user: &str) -> Option<T> {
-    let saved = Entry::new(KEYRING_SERVICE, user).ok()?.get_password().ok()?;
-    serde_json::from_str(&saved).ok()
+    serde_json::from_str(&secret_store::load(KEYRING_SERVICE, user)?).ok()
 }
 
 fn save_json<T: Serialize>(user: &str, value: &T) -> Result<(), String> {
-    let entry = Entry::new(KEYRING_SERVICE, user).map_err(|e| e.to_string())?;
     let json = serde_json::to_string(value).map_err(|e| e.to_string())?;
-    entry.set_password(&json).map_err(|e| e.to_string())
+    secret_store::save(KEYRING_SERVICE, user, &json)
 }
 
 fn queue_path() -> PathBuf {
