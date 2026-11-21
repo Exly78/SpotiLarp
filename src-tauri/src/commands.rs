@@ -337,42 +337,99 @@ pub async fn pick_folder(window: WebviewWindow) -> Option<String> {
     folder.into_path().ok().map(|path| path.to_string_lossy().into_owned())
 }
 
-/// Where shared GIFs go: catbox.moe, a free file host whose links Discord
-/// plays right in the chat (SpotiLarp has no server of its own to put them on).
-const GIF_HOST: &str = "https://catbox.moe/user/api.php";
-const GIF_LINKS: &str = "https://files.catbox.moe/";
+/// Where shared GIFs go: free file hosts that take uploads from apps and
+/// whose links Discord plays right in the chat (it won't from some, catbox.moe
+/// among them). qu.ax keeps them a year; x0.at, if qu.ax is down, about 100
+/// days. SpotiLarp has no server of its own to put them on.
+const QUAX_UPLOAD: &str = "https://qu.ax/upload";
+/// qu.ax's link to the file itself. Its page (what the upload answers with)
+/// shows the GIF in an embed of its own, around it.
+const QUAX_FILES: &str = "https://qu.ax/dc/";
+const X0_UPLOAD: &str = "https://x0.at";
 
-/// Uploads a GIF made on the page (a stats card to share) and returns its
-/// link. The GIF is the request's raw body.
+/// Uploads a GIF made on the page (a stats card to share) and returns a link
+/// straight to it. The GIF is the request's raw body.
 #[tauri::command]
 pub async fn upload_share_gif(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(gif) = request.body() else {
         return Err("Couldn't upload the GIF: it didn't arrive as one".into());
     };
-    let part = reqwest::multipart::Part::bytes(gif.clone())
-        .file_name("spotilarp-stats.gif")
-        .mime_str("image/gif")
-        .map_err(|e| e.to_string())?;
-    let form = reqwest::multipart::Form::new()
-        .text("reqtype", "fileupload")
-        .part("fileToUpload", part);
+    let gif = gif.clone();
     let client = crate::http::client_builder()
         .timeout(std::time::Duration::from_secs(90))
         .user_agent(concat!("SpotiLarp/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
+    match upload_to_quax(&client, gif.clone()).await {
+        Ok(link) => Ok(link),
+        Err(quax) => upload_to_x0(&client, gif)
+            .await
+            .map_err(|x0| format!("Couldn't upload the GIF: {quax}, and {x0}")),
+    }
+}
+
+fn gif_part(gif: Vec<u8>) -> Result<reqwest::multipart::Part, String> {
+    reqwest::multipart::Part::bytes(gif)
+        .file_name("spotilarp-stats.gif")
+        .mime_str("image/gif")
+        .map_err(|e| e.to_string())
+}
+
+async fn upload_to_quax(client: &reqwest::Client, gif: Vec<u8>) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Uploaded {
+        files: Vec<UploadedFile>,
+    }
+    #[derive(serde::Deserialize)]
+    struct UploadedFile {
+        url: String,
+    }
+    let form = reqwest::multipart::Form::new()
+        .text("expiry", "365")
+        .part("files[]", gif_part(gif)?);
     let response = client
-        .post(GIF_HOST)
+        .post(QUAX_UPLOAD)
         .multipart(form)
         .send()
         .await
-        .map_err(|e| format!("Couldn't upload the GIF: {e}"))?;
+        .map_err(|e| format!("qu.ax couldn't be reached ({e})"))?;
+    if !response.status().is_success() {
+        return Err(format!("qu.ax answered {}", response.status()));
+    }
+    let uploaded: Uploaded = response.json().await.map_err(|e| format!("qu.ax answered oddly ({e})"))?;
+    let page = uploaded.files.into_iter().next().map(|file| file.url).unwrap_or_default();
+    let id = page
+        .rsplit('/')
+        .next()
+        .filter(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric()))
+        .ok_or_else(|| "qu.ax answered without a link".to_string())?;
+    let link = format!("{QUAX_FILES}{id}.gif");
+    // Its link to the file is worked out, not given: checked before it's handed on.
+    let check = client.head(&link).send().await.map_err(|e| format!("qu.ax's link didn't work ({e})"))?;
+    let is_gif = check
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|kind| kind.starts_with("image/gif"));
+    if !check.status().is_success() || !is_gif {
+        return Err("qu.ax's link didn't lead to the GIF".into());
+    }
+    Ok(link)
+}
+
+async fn upload_to_x0(client: &reqwest::Client, gif: Vec<u8>) -> Result<String, String> {
+    let form = reqwest::multipart::Form::new().part("file", gif_part(gif)?);
+    let response = client
+        .post(X0_UPLOAD)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("x0.at couldn't be reached ({e})"))?;
     let status = response.status();
-    let text = response.text().await.map_err(|e| format!("Couldn't upload the GIF: {e}"))?;
+    let text = response.text().await.unwrap_or_default();
     let link = text.trim();
-    if !status.is_success() || !link.starts_with(GIF_LINKS) {
-        let said: String = link.chars().take(120).collect();
-        return Err(format!("Couldn't upload the GIF: catbox.moe answered {status}: {said}"));
+    if !status.is_success() || !link.starts_with("https://x0.at/") {
+        return Err(format!("x0.at answered {status}"));
     }
     Ok(link.to_string())
 }

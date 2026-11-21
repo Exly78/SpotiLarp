@@ -328,7 +328,7 @@ export const trackerImport = () => invoke("tracker_import");
  */
 export const saveImage = (png, fileName) => invoke("save_image", png, { headers: { "file-name": fileName } });
 /**
- * Uploads a GIF of a stats card to catbox.moe, a free file host, and returns its link.
+ * Uploads a GIF of a stats card to a free file host (qu.ax, else x0.at) and returns a link to it.
  * @param {Uint8Array} gif
  * @returns {Promise<string>}
  */

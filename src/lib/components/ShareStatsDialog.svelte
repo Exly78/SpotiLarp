@@ -195,9 +195,8 @@
       </div>
 
       <p class="note">
-        Share on Discord puts a small GIF of the card on catbox.moe, a free file host, and copies its link. It stays up
-        for good and anyone with the link can see it. Copy link holds the stats in the link itself, so nothing is
-        uploaded.
+        Share on Discord puts a small GIF of the card on qu.ax, a free file host, for a year and copies its link.
+        Anyone with the link can see it. Copy link holds the stats in the link itself, so nothing is uploaded.
       </p>
     </div>
   </div>
