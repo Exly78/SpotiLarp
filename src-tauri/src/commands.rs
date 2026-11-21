@@ -337,6 +337,46 @@ pub async fn pick_folder(window: WebviewWindow) -> Option<String> {
     folder.into_path().ok().map(|path| path.to_string_lossy().into_owned())
 }
 
+/// Where shared GIFs go: catbox.moe, a free file host whose links Discord
+/// plays right in the chat (SpotiLarp has no server of its own to put them on).
+const GIF_HOST: &str = "https://catbox.moe/user/api.php";
+const GIF_LINKS: &str = "https://files.catbox.moe/";
+
+/// Uploads a GIF made on the page (a stats card to share) and returns its
+/// link. The GIF is the request's raw body.
+#[tauri::command]
+pub async fn upload_share_gif(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(gif) = request.body() else {
+        return Err("Couldn't upload the GIF: it didn't arrive as one".into());
+    };
+    let part = reqwest::multipart::Part::bytes(gif.clone())
+        .file_name("spotilarp-stats.gif")
+        .mime_str("image/gif")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .text("reqtype", "fileupload")
+        .part("fileToUpload", part);
+    let client = crate::http::client_builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .user_agent(concat!("SpotiLarp/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .post(GIF_HOST)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't upload the GIF: {e}"))?;
+    let status = response.status();
+    let text = response.text().await.map_err(|e| format!("Couldn't upload the GIF: {e}"))?;
+    let link = text.trim();
+    if !status.is_success() || !link.starts_with(GIF_LINKS) {
+        let said: String = link.chars().take(120).collect();
+        return Err(format!("Couldn't upload the GIF: catbox.moe answered {status}: {said}"));
+    }
+    Ok(link.to_string())
+}
+
 /// Asks where to save a picture made on the page (a stats card to share) and
 /// saves it. The PNG is the request's raw body and its suggested name the
 /// `file-name` header. Returns where it went; `None` when no file was picked.

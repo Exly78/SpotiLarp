@@ -1,9 +1,10 @@
 <script>
   import { onMount } from "svelte";
   import { fade } from "svelte/transition";
-  import { openUrl } from "@tauri-apps/plugin-opener";
+  import * as api from "../api.js";
   import { notify } from "../toast.svelte.js";
   import { cardColor, drawCard, saveCardImage, copyCardImage, shareLink } from "../shareCard.js";
+  import { drawShareGif } from "../shareGif.js";
   import Icon from "./Icon.svelte";
   import Toggle from "./Toggle.svelte";
 
@@ -22,11 +23,12 @@
   let png = $state(null);
   let preview = $state("");
   let error = $state("");
-  /** Discord's app, on the chats you were in last. */
-  const DISCORD_APP = "discord://-/channels/@me";
-
   /** @type {""|"discord"|"save"|"copy"|"link"} */
   let busy = $state("");
+  /** What sharing on Discord is doing, for its button. */
+  let gifStep = $state("");
+  /** The uploaded GIF's link, once there is one for what the card shows. */
+  let gifLink = $state("");
 
   const shown = $derived({ ...card, name: showName ? card.name : "", color });
   const label = $derived(card.kind === "recap" ? `Share your ${card.title} Recap` : "Share your stats");
@@ -42,6 +44,7 @@
     const current = shown;
     let cancelled = false;
     png = null;
+    gifLink = "";
     drawCard(current)
       .then((blob) => {
         if (cancelled) return;
@@ -78,19 +81,24 @@
     }
   }
 
-  // Discord shows a pasted picture right in the chat, so the picture goes
-  // on the clipboard and Discord comes up to paste it into.
+  // Discord plays a GIF link right in the chat, so the card goes up as a
+  // small GIF and its link is what's shared. Made once for what it shows.
   function shareOnDiscord() {
     return act("discord", async () => {
-      if (!png) return;
       try {
-        await copyCardImage(png);
+        if (!gifLink) {
+          gifStep = "Making the GIF...";
+          const gif = await drawShareGif(shown);
+          gifStep = "Uploading...";
+          gifLink = await api.uploadShareGif(gif);
+        }
+        await navigator.clipboard.writeText(gifLink);
+        notify("GIF link copied. Paste it in Discord and it plays right in the chat.");
       } catch (e) {
-        notify(`Couldn't copy the picture, save it instead: ${e}`);
-        return;
+        notify(`${e}`.startsWith("Couldn't") ? `${e}` : `Couldn't share the GIF: ${e}`);
+      } finally {
+        gifStep = "";
       }
-      notify("Picture copied. Paste it into any Discord chat with Ctrl+V.");
-      openUrl(DISCORD_APP).catch(() => {});
     });
   }
 
@@ -171,9 +179,9 @@
       {/if}
 
       <div class="actions">
-        <button type="button" class="pill primary" onclick={shareOnDiscord} disabled={!png || busy !== ""}>
+        <button type="button" class="pill primary" onclick={shareOnDiscord} disabled={!color || busy !== ""}>
           <Icon name="discord" size={16} />
-          {busy === "discord" ? "Copying..." : "Share on Discord"}
+          {gifStep || (gifLink ? "Copy GIF link again" : "Share on Discord")}
         </button>
         <button type="button" class="pill" onclick={copyImage} disabled={!png || busy !== ""}>
           {busy === "copy" ? "Copying..." : "Copy picture"}
@@ -187,8 +195,9 @@
       </div>
 
       <p class="note">
-        The link holds the stats on the card itself, so they aren't uploaded anywhere. Anyone you send it to can see
-        them.
+        Share on Discord puts a small GIF of the card on catbox.moe, a free file host, and copies its link. It stays up
+        for good and anyone with the link can see it. Copy link holds the stats in the link itself, so nothing is
+        uploaded.
       </p>
     </div>
   </div>

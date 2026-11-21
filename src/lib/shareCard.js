@@ -32,11 +32,11 @@ export const CARD_TOP = 5;
 const WIDTH = 1080;
 const HEIGHT = 1920;
 const PAD = 88;
-const FONT = `"Gotham", "Circular Std", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif`;
-const WHITE = "#ffffff";
-const DIM = "rgba(255, 255, 255, 0.74)";
+export const FONT = `"Gotham", "Circular Std", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif`;
+export const WHITE = "#ffffff";
+export const DIM = "rgba(255, 255, 255, 0.74)";
 /** Behind the card when its pictures give no color. */
-const FALLBACK_COLOR = "#3b1e6e";
+export const FALLBACK_COLOR = "#3b1e6e";
 /** Darkest a background's relative luminance gets brought down to, so white reads on it. */
 const MAX_LUMINANCE = 0.14;
 const IMAGE_TIMEOUT_MS = 8000;
@@ -147,7 +147,7 @@ function luminance(r, g, b) {
 }
 
 /** The top artist's picture, else the top song's cover. @param {ShareCard} card */
-function mainPicture(card) {
+export function mainPicture(card) {
   return card.artists[0]?.image ?? card.songs[0]?.image ?? null;
 }
 
@@ -286,7 +286,7 @@ export async function drawCard(card) {
  * @param {number} w
  * @param {number} h
  */
-function drawCover(ctx, image, x, y, w, h) {
+export function drawCover(ctx, image, x, y, w, h) {
   const scale = Math.max(w / image.width, h / image.height);
   const drawnW = image.width * scale;
   const drawnH = image.height * scale;
@@ -302,7 +302,7 @@ function drawCover(ctx, image, x, y, w, h) {
  * @param {number} width
  * @param {number} height
  */
-function drawBlurred(ctx, image, width, height) {
+export function drawBlurred(ctx, image, width, height) {
   const tiny = document.createElement("canvas");
   tiny.width = 9;
   tiny.height = 16;
@@ -336,7 +336,7 @@ function drawBlurred(ctx, image, width, height) {
  * @param {number} cy
  * @param {number} r
  */
-function drawRecord(ctx, image, cx, cy, r) {
+export function drawRecord(ctx, image, cx, cy, r) {
   ctx.save();
   ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
   ctx.shadowBlur = 40;
@@ -382,11 +382,11 @@ function drawRecord(ctx, image, cx, cy, r) {
 }
 
 /** @param {string} text */
-function capitalize(text) {
+export function capitalize(text) {
   return text.replace(/(^|\s)\p{Ll}/gu, (letter) => letter.toUpperCase());
 }
 
-async function loadFonts() {
+export async function loadFonts() {
   try {
     await Promise.all(["800 100px", "700 36px", "500 36px", "400 36px"].map((font) => document.fonts.load(`${font} "Gotham"`)));
   } catch {
@@ -400,7 +400,7 @@ async function loadFonts() {
  * @param {string} url
  * @returns {Promise<HTMLImageElement|null>}
  */
-function loadImage(url) {
+export function loadImage(url) {
   return new Promise((resolve) => {
     const image = new Image();
     const timer = setTimeout(() => resolve(null), IMAGE_TIMEOUT_MS);
@@ -427,7 +427,7 @@ function loadImage(url) {
  * @param {number} maxSize
  * @param {number} maxLines
  */
-function fitLines(ctx, text, weight, width, maxSize, maxLines) {
+export function fitLines(ctx, text, weight, width, maxSize, maxLines) {
   const words = text.split(/\s+/).filter(Boolean);
   const minSize = Math.min(48, maxSize);
   for (let size = maxSize; size >= minSize; size -= 4) {
@@ -461,7 +461,7 @@ function wrap(ctx, words, width) {
  * @param {string} text
  * @param {number} width
  */
-function ellipsize(ctx, text, width) {
+export function ellipsize(ctx, text, width) {
   if (ctx.measureText(text).width <= width) return text;
   const characters = [...text];
   let low = 0;

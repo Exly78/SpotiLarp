@@ -277,6 +277,7 @@ pub fn run() {
             commands::preview_equalizer,
             commands::pick_folder,
             commands::save_image,
+            commands::upload_share_gif,
             commands::set_playlist_cover,
             commands::get_local_files,
             commands::rescan_local_files,
