@@ -108,7 +108,7 @@ export function cardSubtitle(card) {
 /** A name that's safe in a file name and a request header. @param {ShareCard} card */
 export function cardFileName(card) {
   const title = card.title.replace(/[^\x20-\x7e]/g, "").replace(/[\\/:*?"<>|]/g, "").trim();
-  return card.kind === "recap" ? `SpotiLarp Recap ${title}.png` : `SpotiLarp stats - ${title || "listening"}.png`;
+  return card.kind === "recap" ? `SpotiLarp - ${title}, Larped.png` : `SpotiLarp stats - ${title || "listening"}.png`;
 }
 
 // ---- The background ----
@@ -516,7 +516,7 @@ export async function drawPlaylistCover(card) {
   const yearBaseline = 110 + year.size * 0.74;
   ctx.fillText(year.lines[0] ?? "", pad - year.size * 0.04, yearBaseline);
   ctx.font = `800 96px ${FONT}`;
-  ctx.fillText("Recap", pad - 3, yearBaseline + 100);
+  ctx.fillText("Larped", pad - 3, yearBaseline + 100);
 
   if (card.name) {
     ctx.font = `700 34px ${FONT}`;

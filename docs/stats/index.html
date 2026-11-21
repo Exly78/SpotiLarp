@@ -344,7 +344,7 @@
         byId("title").classList.toggle("long", title.length > 5);
         const whose = name ? `${name}'s` : "My";
         byId("sub").textContent = recap ? `${whose} year in music` : `${whose} listening`;
-        document.title = `${recap ? `${whose} ${title} Recap` : `${whose} stats: ${title}`} · SpotiLarp`;
+        document.title = `${recap ? `${whose} ${title}, Larped` : `${whose} stats: ${title}`} · SpotiLarp`;
 
         for (const [artistName, id] of artists) {
           byId("artists").append(row(text(artistName, 120), ID.test(id ?? "") ? `https://open.spotify.com/artist/${id}` : ""));

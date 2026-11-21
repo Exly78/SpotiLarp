@@ -229,7 +229,7 @@
       </button>
       <button type="button" class="secondary" onclick={share} disabled={!tracker.loaded || sum.plays === 0}>Share</button>
       <button type="button" class="recap" onclick={() => openRecap(recapFor)} disabled={!tracker.loaded}>
-        Your {recapFor} Recap
+        {recapFor}, Larped
       </button>
     </div>
   </header>

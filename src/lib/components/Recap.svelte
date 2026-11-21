@@ -336,7 +336,7 @@
 
   const topTracks = $derived(recap.songs.map((song) => asTrack(song.track)));
   const playlistName = $derived(`Your top songs ${recap.year}`);
-  const recapTitle = $derived(name ? `${name}'s ${recap.year} Recap` : `My ${recap.year} Recap`);
+  const recapTitle = $derived(name ? `${name}'s ${recap.year}, Larped` : `My ${recap.year}, Larped`);
 
   /** @returns {import("../shareCard.js").ShareCard} */
   function recapCard() {
@@ -393,7 +393,7 @@
       notify(
         covered
           ? `Saved as "${recapTitle}". Copy its link to show it off on Discord.`
-          : `Saved as "${recapTitle}". Log out and back in to put your Recap on its cover.`,
+          : `Saved as "${recapTitle}". Log out and back in to give it its Larped cover.`,
       );
     } catch (e) {
       notify(`Couldn't save the playlist: ${e}`);
@@ -475,7 +475,7 @@
   class="recap"
   role="dialog"
   aria-modal="true"
-  aria-label={`Your ${recap.year} Recap`}
+  aria-label={`Your ${recap.year}, Larped`}
   tabindex="-1"
   bind:this={root}
   transition:fade={{ duration: 160 }}
@@ -516,13 +516,13 @@
     {#key `${recap.year} ${index}`}
       <section class="slide {kind}" aria-roledescription="slide" aria-label={`${index + 1} of ${shownSlides.length}`}>
         {#if kind === "intro"}
-          {@render band(`${recap.year} Recap`, "4%")}
-          {@render band(`${recap.year} Recap`, "19%", true)}
-          {@render band(`${recap.year} Recap`, "34%")}
+          {@render band(`${recap.year} Larped`, "4%")}
+          {@render band(`${recap.year} Larped`, "19%", true)}
+          {@render band(`${recap.year} Larped`, "34%")}
           <div class="bottom">
             <p class="lead rise">Your</p>
             <h2 class="giant rise" style:--d="1">{recap.year}</h2>
-            <p class="lead rise" style:--d="2">Recap</p>
+            <p class="lead rise" style:--d="2">Larped</p>
             {#if !tracker.loaded}
               <p class="body rise" style:--d="3">Loading your listening...</p>
             {:else if enough}

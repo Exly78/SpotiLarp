@@ -31,7 +31,7 @@
   let gifLink = $state("");
 
   const shown = $derived({ ...card, name: showName ? card.name : "", color });
-  const label = $derived(card.kind === "recap" ? `Share your ${card.title} Recap` : "Share your stats");
+  const label = $derived(card.kind === "recap" ? `Share your ${card.title}, Larped` : "Share your stats");
 
   onMount(() => {
     dialog?.focus();

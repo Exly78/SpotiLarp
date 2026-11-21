@@ -1,5 +1,6 @@
 /**
- * A year of listening looked back on, for the Recap (components/Recap.svelte),
+ * A year of listening looked back on, for the Recap (components/Recap.svelte;
+ * the app calls it "Larped", as in "Your 2026, Larped"),
  * worked out from the tracker's plays in one go. Plain functions, like
  * trackerStats.js.
  *

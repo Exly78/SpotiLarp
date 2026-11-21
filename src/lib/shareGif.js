@@ -92,8 +92,8 @@ function scenes(card, pictures) {
         const e = ease(t);
         ctx.fillStyle = "#1ed760";
         ctx.fillRect(0, 0, SIZE, SIZE);
-        band(ctx, card.kind === "recap" ? "Recap" : "Stats", 70, "rgba(4, 33, 15, 0.22)", t);
-        band(ctx, card.kind === "recap" ? "Recap" : "Stats", 430, "rgba(4, 33, 15, 0.22)", 1 - t);
+        band(ctx, card.kind === "recap" ? "Larped" : "Stats", 70, "rgba(4, 33, 15, 0.22)", t);
+        band(ctx, card.kind === "recap" ? "Larped" : "Stats", 430, "rgba(4, 33, 15, 0.22)", 1 - t);
         brand(ctx, INK_GREEN);
         ctx.globalAlpha = e;
         ctx.fillStyle = INK_GREEN;
