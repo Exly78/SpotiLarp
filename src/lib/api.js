@@ -24,10 +24,11 @@ export function setRateLimitedHandler(handler) {
 /**
  * @param {string} command
  * @param {import("@tauri-apps/api/core").InvokeArgs} [args]
+ * @param {import("@tauri-apps/api/core").InvokeOptions} [options]
  * @returns {Promise<any>}
  */
-function invoke(command, args) {
-  return tauriInvoke(command, args).catch((e) => {
+function invoke(command, args, options) {
+  return tauriInvoke(command, args, options).catch((e) => {
     if (e === LOGIN_EXPIRED) onLoginExpired();
     else if (isRateLimited(e)) onRateLimited();
     throw e;
@@ -318,6 +319,22 @@ export const trackerClear = () => invoke("tracker_clear");
  * @returns {Promise<{ files: number, found: number, added: number, duplicates: number, too_short: number, unmatched: number }|null>}
  */
 export const trackerImport = () => invoke("tracker_import");
+/**
+ * Asks where to save a PNG made on the page (a stats card) and saves it there.
+ * Sent as the request's raw body. Returns where it went, or null if no file was picked.
+ * @param {Uint8Array} png
+ * @param {string} fileName suggested, ASCII
+ * @returns {Promise<string|null>}
+ */
+export const saveImage = (png, fileName) => invoke("save_image", png, { headers: { "file-name": fileName } });
+/**
+ * Puts a picture on a playlist as its cover. False when the login doesn't
+ * allow it (logged in before SpotiLarp asked for that).
+ * @param {string} playlistId
+ * @param {string} jpeg base64, at most 256 KB
+ * @returns {Promise<boolean>}
+ */
+export const setPlaylistCover = (playlistId, jpeg) => invoke("set_playlist_cover", { playlistId, jpeg });
 /**
  * @param {string} playlistId
  * @param {string[]} uris

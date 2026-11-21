@@ -276,6 +276,8 @@ pub fn run() {
             commands::list_output_devices,
             commands::preview_equalizer,
             commands::pick_folder,
+            commands::save_image,
+            commands::set_playlist_cover,
             commands::get_local_files,
             commands::rescan_local_files,
             commands::window_hidden,

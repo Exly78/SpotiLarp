@@ -12,6 +12,7 @@
     "core:window:allow-set-fullscreen",
     "core:webview:allow-set-webview-zoom",
     "opener:default",
+    { "identifier": "opener:allow-open-url", "allow": [{ "url": "discord://*" }] },
     "updater:default",
     "process:allow-restart"
   ]

@@ -1,0 +1,379 @@
+<!doctype html>
+<!--
+  Where a shared SpotiLarp stats link leads. The stats ride in the link after
+  the # (written by src/lib/shareCard.js, shareLink): what comes after a # stays
+  in the browser and is never sent to the server, so nothing about them is
+  stored anywhere. Everything read from it is checked before it's shown, and
+  only ever set as text, Spotify links built from IDs, and pictures from
+  Spotify's image server.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <!-- What Discord and other apps show for a link. It can't show the stats
+         themselves: they're after the #, which never reaches whoever asks. -->
+    <meta name="theme-color" content="#1ed760" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SpotiLarp" />
+    <meta property="og:title" content="Listening stats from SpotiLarp" />
+    <meta property="og:description" content="Top artists, top songs and minutes listened. Open the link to see them." />
+    <meta property="og:url" content="https://exly78.github.io/SpotiLarp/stats/" />
+    <meta property="og:image" content="https://exly78.github.io/SpotiLarp/stats/preview.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="SpotiLarp listening stats" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <title>Listening stats · SpotiLarp</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121212;
+        --text: #ffffff;
+        --muted: #a7a7a7;
+        --accent: #1ed760;
+        --field: #3b1e6e;
+        --ink-dim: rgba(255, 255, 255, 0.74);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+        padding: 24px 16px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Circular Std", Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 440px;
+      }
+      .card {
+        position: relative;
+        isolation: isolate;
+        container-type: inline-size;
+        padding: 8cqi 8cqi 9cqi;
+        border-radius: 16px;
+        background: var(--field);
+        overflow: hidden;
+      }
+      /* The main picture's colors, blurred behind everything. */
+      .glow {
+        position: absolute;
+        inset: -20%;
+        z-index: -1;
+        background: center / cover no-repeat;
+        filter: blur(40px) saturate(1.5) brightness(0.7);
+        opacity: 0.85;
+      }
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.55));
+      }
+      .brand {
+        font-size: 3.6cqi;
+        font-weight: 700;
+      }
+      .dot {
+        display: inline-block;
+        width: 2.4cqi;
+        height: 2.4cqi;
+        margin-right: 1.4cqi;
+        border-radius: 50%;
+        background: var(--accent);
+        vertical-align: -0.1em;
+      }
+      h1 {
+        margin: 7cqi 0 0 -0.04em;
+        font-size: 30cqi;
+        font-weight: 900;
+        letter-spacing: -0.05em;
+        line-height: 0.92;
+        overflow-wrap: anywhere;
+      }
+      h1.long {
+        font-size: 15cqi;
+        letter-spacing: -0.04em;
+      }
+      .sub {
+        margin: 2.4cqi 0 0;
+        font-size: 4.4cqi;
+        color: var(--ink-dim);
+      }
+      .picture {
+        position: relative;
+        width: 58%;
+        aspect-ratio: 1;
+        margin-top: 6cqi;
+      }
+      .sleeve,
+      .record,
+      .label {
+        position: absolute;
+        background: center / cover no-repeat;
+      }
+      .sleeve {
+        inset: 0;
+        z-index: 1;
+        border-radius: 1.4cqi;
+        box-shadow: 0 3cqi 7cqi rgba(0, 0, 0, 0.45);
+      }
+      .record {
+        top: 3%;
+        left: 3%;
+        width: 94%;
+        height: 94%;
+        border-radius: 50%;
+        background: repeating-radial-gradient(circle, #141414 0 0.35cqi, #202020 0.35cqi 0.7cqi);
+        box-shadow: 0 2cqi 5cqi rgba(0, 0, 0, 0.5);
+        animation: slide-out 1s 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+      }
+      .label {
+        top: 32%;
+        left: 32%;
+        width: 36%;
+        height: 36%;
+        border-radius: 50%;
+        animation: spin 2.4s linear infinite;
+      }
+      @keyframes slide-out {
+        to {
+          transform: translateX(48%);
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .record {
+          animation: none;
+          transform: translateX(48%);
+        }
+        .label {
+          animation: none;
+        }
+      }
+      .columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7cqi 4cqi;
+        margin-top: 7cqi;
+      }
+      .columns section {
+        min-width: 0;
+      }
+      h2 {
+        margin: 0 0 1.6cqi;
+        font-size: 3.2cqi;
+        font-weight: 700;
+        color: var(--ink-dim);
+      }
+      ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: row;
+      }
+      li {
+        counter-increment: row;
+        font-size: 3.6cqi;
+        font-weight: 500;
+        line-height: 1.7;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      li::before {
+        content: counter(row);
+        display: inline-block;
+        width: 4.4cqi;
+        font-weight: 700;
+        color: var(--ink-dim);
+      }
+      li a {
+        color: inherit;
+        text-decoration: none;
+      }
+      li a:hover {
+        text-decoration: underline;
+      }
+      .figure {
+        margin: 0;
+        font-size: 7.6cqi;
+        font-weight: 900;
+        letter-spacing: -0.03em;
+        line-height: 1.05;
+        overflow-wrap: anywhere;
+      }
+      .genre {
+        text-transform: capitalize;
+      }
+      .foot {
+        margin: 20px 4px 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      .foot a,
+      .broken a {
+        color: var(--text);
+      }
+      .broken {
+        max-width: 420px;
+        margin-top: 20vh;
+        text-align: center;
+      }
+      .broken h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+        letter-spacing: -0.01em;
+      }
+      .broken p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="ready" hidden>
+      <article class="card" id="card">
+        <div class="glow" id="glow" hidden></div>
+        <div class="brand"><span class="dot"></span>SpotiLarp</div>
+        <h1 id="title"></h1>
+        <p class="sub" id="sub"></p>
+        <div class="picture" id="picture" hidden>
+          <div class="record"><div class="label" id="label"></div></div>
+          <div class="sleeve" id="sleeve"></div>
+        </div>
+        <div class="columns">
+          <section>
+            <h2>Top artists</h2>
+            <ol id="artists"></ol>
+          </section>
+          <section>
+            <h2>Top songs</h2>
+            <ol id="songs"></ol>
+          </section>
+          <section>
+            <h2>Minutes listened</h2>
+            <p class="figure" id="minutes"></p>
+          </section>
+          <section>
+            <h2 id="second-label"></h2>
+            <p class="figure" id="second"></p>
+          </section>
+        </div>
+      </article>
+      <p class="foot">
+        Made with SpotiLarp, a desktop Spotify client that keeps count of what you play.
+        <a href="https://github.com/Exly78/SpotiLarp/releases/latest">Get SpotiLarp</a> (Windows) to see and share your own.
+      </p>
+    </main>
+
+    <div class="broken" id="broken" hidden>
+      <h1>This link is missing its stats</h1>
+      <p>It may have been cut short when it was copied. Ask for the link again, or open it in an up-to-date browser.</p>
+    </div>
+
+    <script>
+      const ID = /^[A-Za-z0-9]{22}$/;
+      const PICTURE = /^[0-9a-f]{40}$/;
+      const COLOR = /^#[0-9a-f]{6}$/i;
+      const byId = (id) => document.getElementById(id);
+      const text = (value, max) => (typeof value === "string" ? value.slice(0, max) : "");
+      const count = (value) => (Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0);
+      const picture = (hash) => (PICTURE.test(hash ?? "") ? `https://i.scdn.co/image/${hash}` : "");
+
+      function fromBase64url(value) {
+        const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+        const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
+        return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+      }
+
+      // "z": deflated, "j": as it is (see shareCard.js's pack).
+      async function unpack(value) {
+        const bytes = fromBase64url(value.slice(1));
+        if (value[0] === "j") return new TextDecoder().decode(bytes);
+        if (value[0] !== "z" || typeof DecompressionStream !== "function") throw new Error("Can't read this link");
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        return new Response(stream).text();
+      }
+
+      function row(name, href) {
+        const item = document.createElement("li");
+        if (href) {
+          const link = document.createElement("a");
+          link.href = href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.textContent = name;
+          item.append(link);
+        } else {
+          item.textContent = name;
+        }
+        return item;
+      }
+
+      function show(data) {
+        if (!data || data.v !== 1) throw new Error("Unknown link");
+        const recap = data.k === "r";
+        const title = text(data.t, 40);
+        const name = text(data.n, 60);
+        const artists = (Array.isArray(data.a) ? data.a : []).slice(0, 5).filter(Array.isArray);
+        const songs = (Array.isArray(data.s) ? data.s : []).slice(0, 5).filter(Array.isArray);
+        if (!title || (artists.length === 0 && songs.length === 0)) throw new Error("Nothing to show");
+
+        if (COLOR.test(data.c ?? "")) document.documentElement.style.setProperty("--field", data.c);
+        byId("title").textContent = title;
+        byId("title").classList.toggle("long", title.length > 5);
+        const whose = name ? `${name}'s` : "My";
+        byId("sub").textContent = recap ? `${whose} year in music` : `${whose} listening`;
+        document.title = `${recap ? `${whose} ${title} Recap` : `${whose} stats: ${title}`} · SpotiLarp`;
+
+        for (const [artistName, id] of artists) {
+          byId("artists").append(row(text(artistName, 120), ID.test(id ?? "") ? `https://open.spotify.com/artist/${id}` : ""));
+        }
+        for (const [songName, , id] of songs) {
+          byId("songs").append(row(text(songName, 160), ID.test(id ?? "") ? `https://open.spotify.com/track/${id}` : ""));
+        }
+        const main = picture(artists[0]?.[2]) || picture(songs[0]?.[3]);
+        if (main) {
+          for (const id of ["glow", "label", "sleeve"]) byId(id).style.backgroundImage = `url("${main}")`;
+          byId("glow").hidden = false;
+          byId("picture").hidden = false;
+        }
+
+        byId("minutes").textContent = count(data.m).toLocaleString();
+        const genre = text(data.g, 60);
+        byId("second-label").textContent = genre ? "Top genre" : "Plays";
+        byId("second").textContent = genre || count(data.p).toLocaleString();
+        byId("second").classList.toggle("genre", Boolean(genre));
+        byId("ready").hidden = false;
+      }
+
+      // Another link opened in the same tab only changes the #.
+      addEventListener("hashchange", () => location.reload());
+      unpack(decodeURIComponent(location.hash.slice(1)))
+        .then((json) => show(JSON.parse(json)))
+        .catch(() => {
+          byId("broken").hidden = false;
+        });
+    </script>
+  </body>
+</html>

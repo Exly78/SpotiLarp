@@ -15,6 +15,9 @@
   import { navigate, openAlbum, openArtist } from "../../nav.svelte.js";
   import { compactDuration, coverAtLeast, formatCount } from "../../utils.js";
   import { cached, MINUTE } from "../../requestCache.js";
+  import { recapYear } from "../../recap.js";
+  import { statsCard } from "../../shareCard.js";
+  import { openRecap, openShareCard } from "../../sharing.svelte.js";
   import ListeningChart from "../ListeningChart.svelte";
   import ListeningHeatmap from "../ListeningHeatmap.svelte";
   import MediaCard from "../MediaCard.svelte";
@@ -81,6 +84,14 @@
   const heat = $derived(byHour(inRange));
   const sources = $derived(bySource(inRange));
   const imported = $derived(bySource(plays)[FROM_IMPORT] > 0);
+  // The Recap for the year picked, else the latest with enough in it.
+  const recapFor = $derived(recapYear(plays, yearOf(rangeKey)));
+
+  /** The year a range is, if it's one. @param {RangeKey} key */
+  function yearOf(key) {
+    if (key === "year") return new Date().getFullYear();
+    return key.startsWith("y") ? Number(key.slice(1)) : null;
+  }
 
   const sinceFormat = new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" });
   const songItems = $derived(
@@ -126,6 +137,13 @@
         .catch(() => {});
     }
   });
+
+  function share() {
+    const title = `${range.label.charAt(0).toUpperCase()}${range.label.slice(1)}`;
+    // Spotify's genres are for its own stretch of time: only on the card when that's the one picked.
+    const genre = rangeKey === "4w" || rangeKey === "6m" || rangeKey === "all" ? (genres[0]?.name ?? "") : "";
+    openShareCard(statsCard(inRange, { title, pictures, genre }));
+  }
 
   /** @param {{ id: string, name: string }} artist */
   function openTrackerArtist(artist) {
@@ -205,9 +223,15 @@
 <div class="stats">
   <header class="header">
     <h1 class="title">Your stats</h1>
-    <button type="button" class="secondary" onclick={importSpotifyHistory} disabled={tracker.importing}>
-      {tracker.importing ? "Importing..." : "Import Spotify history"}
-    </button>
+    <div class="header-actions">
+      <button type="button" class="secondary" onclick={importSpotifyHistory} disabled={tracker.importing}>
+        {tracker.importing ? "Importing..." : "Import Spotify history"}
+      </button>
+      <button type="button" class="secondary" onclick={share} disabled={!tracker.loaded || sum.plays === 0}>Share</button>
+      <button type="button" class="recap" onclick={() => openRecap(recapFor)} disabled={!tracker.loaded}>
+        Your {recapFor} Recap
+      </button>
+    </div>
   </header>
 
   <div class="tabs" role="tablist">
@@ -403,7 +427,14 @@
   letter-spacing: -0.02em;
   color: var(--text);
 }
-.secondary {
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6em;
+}
+.secondary,
+.recap {
   flex-shrink: 0;
   padding: 0.45em 1.1em;
   border: 1px solid var(--border-strong);
@@ -419,7 +450,17 @@
 .secondary:hover:not(:disabled) {
   border-color: var(--text);
 }
-.secondary:disabled {
+.recap {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-text);
+  transition: background-color var(--transition);
+}
+.recap:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.secondary:disabled,
+.recap:disabled {
   opacity: 0.5;
   cursor: default;
 }

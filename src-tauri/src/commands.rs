@@ -7,7 +7,7 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::{MappedMutexGuard, MutexGuard};
 
-use crate::auth::{loopback, oauth, AUTH_SCOPES, REDIRECT_PATH, REDIRECT_PORT};
+use crate::auth::{loopback, oauth, AUTH_SCOPES, COVER_SCOPE, REDIRECT_PATH, REDIRECT_PORT};
 use crate::config::{self, Settings};
 use crate::discord;
 use crate::discord::PresenceUpdate;
@@ -67,7 +67,8 @@ pub async fn set_client_id(state: State<'_, AppState>, client_id: String) -> Res
 #[tauri::command]
 pub async fn login(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
     let client_id = state.spotify.lock().await.require_client_id()?.to_string();
-    let code = oauth::browser_login(&app, &client_id, AUTH_SCOPES, REDIRECT_PORT, REDIRECT_PATH, true).await?;
+    let scopes = format!("{AUTH_SCOPES} {COVER_SCOPE}");
+    let code = oauth::browser_login(&app, &client_id, &scopes, REDIRECT_PORT, REDIRECT_PATH, true).await?;
 
     let mut client = state.spotify.lock().await;
     client.exchange_code(&code).await?;
@@ -334,6 +335,47 @@ pub async fn pick_folder(window: WebviewWindow) -> Option<String> {
         });
     let folder = rx.await.ok().flatten()?;
     folder.into_path().ok().map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Asks where to save a picture made on the page (a stats card to share) and
+/// saves it. The PNG is the request's raw body and its suggested name the
+/// `file-name` header. Returns where it went; `None` when no file was picked.
+#[tauri::command]
+pub async fn save_image(window: WebviewWindow, request: tauri::ipc::Request<'_>) -> Result<Option<String>, String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("Couldn't save the picture: it didn't arrive as an image".into());
+    };
+    let png = png.clone();
+    let name = request
+        .headers()
+        .get("file-name")
+        .and_then(|value| value.to_str().ok())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("SpotiLarp stats.png")
+        .to_string();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    window
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("Save your stats picture")
+        .set_file_name(&name)
+        .add_filter("PNG image", &["png"])
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let Some(mut path) = rx.await.ok().flatten().and_then(|path| path.into_path().ok()) else {
+        return Ok(None);
+    };
+    if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("png")) {
+        path.set_extension("png");
+    }
+    let saved = path.to_string_lossy().into_owned();
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&path, png))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("Couldn't save the picture: {e}"))?;
+    Ok(Some(saved))
 }
 
 async fn local_index(state: &AppState, rescan: bool) -> Result<MappedMutexGuard<'_, LocalIndex>, String> {
@@ -1058,6 +1100,19 @@ pub async fn create_playlist(state: State<'_, AppState>, name: String) -> Result
     }
     let mut client = state.spotify.lock().await;
     playlists::create_playlist(&mut client, name).await
+}
+
+/// Puts a picture (a base64 JPEG, at most 256 KB) on a playlist as its cover.
+/// Returns false without trying when the login doesn't allow it (logged in
+/// before SpotiLarp asked for that).
+#[tauri::command]
+pub async fn set_playlist_cover(state: State<'_, AppState>, playlist_id: String, jpeg: String) -> Result<bool, String> {
+    let mut client = state.spotify.lock().await;
+    if !client.has_scope(COVER_SCOPE) {
+        return Ok(false);
+    }
+    playlists::set_cover(&mut client, &playlist_id, jpeg).await?;
+    Ok(true)
 }
 
 #[tauri::command]

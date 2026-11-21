@@ -44,6 +44,9 @@
   import { clearStatsCache } from "$lib/components/views/StatsView.svelte";
   import { clearRadioCache } from "$lib/components/views/RadioView.svelte";
   import ShortcutsDialog from "$lib/components/ShortcutsDialog.svelte";
+  import Recap from "$lib/components/Recap.svelte";
+  import ShareStatsDialog from "$lib/components/ShareStatsDialog.svelte";
+  import { sharing, closeRecap, closeShareCard } from "$lib/sharing.svelte.js";
   import FeatureTour from "$lib/components/FeatureTour.svelte";
   import { tour, startTour, startWhatsNew, finishTour, tourSeen, pendingWhatsNew } from "$lib/tour.svelte.js";
   import NowPlaying from "$lib/components/NowPlaying.svelte";
@@ -980,6 +983,12 @@
 {/if}
 {#if tour.open && appOpen && !miniMode && !uiAsleep}
   <FeatureTour steps={tour.steps} label={tour.label} onClose={finishTour} />
+{/if}
+{#if sharing.recapYear !== null && appOpen && !miniMode && !uiAsleep}
+  <Recap year={sharing.recapYear} onClose={closeRecap} />
+{/if}
+{#if sharing.card && appOpen && !miniMode && !uiAsleep}
+  <ShareStatsDialog card={sharing.card} onClose={closeShareCard} />
 {/if}
 </div>
 

@@ -219,6 +219,14 @@ impl SpotifyClient {
         }
     }
 
+    /// Whether the login allows `scope`. Not knowing yet counts as yes:
+    /// Spotify turns the request away itself if it doesn't.
+    pub fn has_scope(&self, scope: &str) -> bool {
+        self.granted_scopes
+            .as_deref()
+            .is_none_or(|granted| granted.split_whitespace().any(|granted| granted == scope))
+    }
+
     pub async fn missing_scopes(&mut self) -> Result<Vec<String>, String> {
         self.ensure_valid_token().await?;
         let Some(granted) = &self.granted_scopes else {
@@ -398,6 +406,30 @@ impl SpotifyClient {
                 serde_json::from_str(json).map_err(|e| {
                     RequestError::Other(format!("{method} {path} decode error: {e}\nbody: {}", truncate(&text)))
                 })
+            }
+        })
+        .await
+    }
+
+    /// Sends `body` as it is, for the calls that don't take JSON.
+    pub async fn send_bytes(
+        &mut self,
+        method: reqwest::Method,
+        path: &str,
+        content_type: &'static str,
+        body: Vec<u8>,
+    ) -> Result<(), String> {
+        self.with_token(|http, token| {
+            let method = method.clone();
+            let body = body.clone();
+            async move {
+                let request = http
+                    .request(method.clone(), format!("{API_BASE}{path}"))
+                    .header(reqwest::header::CONTENT_TYPE, content_type)
+                    .body(body)
+                    .bearer_auth(token);
+                let resp = send_with_retry(request).await.map_err(RequestError::Other)?;
+                read_body(resp, &format!("{method} {path}")).await.map(|_| ())
             }
         })
         .await

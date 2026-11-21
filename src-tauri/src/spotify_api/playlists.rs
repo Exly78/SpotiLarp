@@ -302,6 +302,12 @@ pub async fn update_details(
     client.send_json(Method::PUT, &path, &body).await
 }
 
+/// Spotify takes a cover as base64 JPEG text, 256 KB at most.
+pub async fn set_cover(client: &mut SpotifyClient, playlist_id: &str, jpeg_base64: String) -> Result<(), String> {
+    let path = format!("/playlists/{playlist_id}/images");
+    client.send_bytes(Method::PUT, &path, "image/jpeg", jpeg_base64.into_bytes()).await
+}
+
 pub async fn remove_playlist(client: &mut SpotifyClient, playlist_id: &str) -> Result<(), String> {
     library::remove(client, &format!("spotify:playlist:{playlist_id}")).await
 }
